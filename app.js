@@ -6,6 +6,7 @@
 const OPENROUTER = 'https://openrouter.ai';
 const APP_TITLE = 'How';
 const SITE_URL = 'https://how.sala.company/';
+const LINKS_API = 'https://how-links.jamal-akuna-matata.workers.dev';
 const CACHE_KEY = 'tmw_cache_v1';
 const CACHE_MAX = 24;
 const RTL = /^(arabic|urdu|persian|hebrew)$/i;
@@ -282,7 +283,7 @@ async function ask(q, { force = false } = {}) {
 // ---------- rendering ----------
 let partsById = {};
 function show(result, q, { free = false, shared = false } = {}) {
-  state.result = result; state.query = q;
+  state.result = result; state.query = q; state.shortId = undefined;
   stopLoading();
   $('#error').hidden = true;
   const r = $('#result');
@@ -545,6 +546,7 @@ async function load3D(terms, known) {
     box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><div class="thumbs"></div>';
     const iframe = $('iframe', box); const thumbs = $('.thumbs', box);
     const pick = (m, btn) => {
+      state.shortId = undefined;
       state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: m.viewerUrl || m.url || '', thumb: thumbOf(m) };
       iframe.src = `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
       $$('button', thumbs).forEach((b) => b.classList.toggle('active', b === btn));
@@ -598,13 +600,8 @@ function updateEstimate() {
 // ---------- sharing: the whole answer travels inside the link ----------
 // The answer (JSON with the SVG) is deflated and base64url-encoded into #r=…, so a reader
 // needs no sign-in and no AI: the page just unpacks and draws it. Typical link: 3–5 KB.
-async function encodeResult(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang } = result;
-  const svg = (result.svg || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
-  const m = state.model3d;
-  const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  const json = JSON.stringify({ title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, m3d, q: state.query });
-  const bytes = new TextEncoder().encode(json);
+async function encodeResult(payload) {
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
   let out = bytes, tag = 'u';
   if (typeof CompressionStream !== 'undefined') {
     const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
@@ -622,12 +619,30 @@ async function decodeResult(str) {
   } else json = new TextDecoder().decode(bytes);
   return JSON.parse(json);
 }
+// Short link: the answer is stored by the links service and the link carries only its id.
+// If the service can't be reached, the long link (answer inside the address) is used instead.
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
   const base = local ? SITE_URL : location.origin + location.pathname;
-  const url = `${base}#${encodeURIComponent(fileSlug())}/r=${await encodeResult(state.result)}`;
-  $('#share-link-size').textContent = `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
+  const slug = encodeURIComponent(fileSlug());
+  const payload = sharePayload(state.result);
+  if (state.shortId === undefined) {
+    try {
+      const res = await fetch(`${LINKS_API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const j = res.ok ? await res.json() : null;
+      state.shortId = j?.id || null;
+    } catch { state.shortId = null; }
+  }
+  const url = state.shortId ? `${base}#${slug}/s=${state.shortId}` : `${base}#${slug}/r=${await encodeResult(payload)}`;
+  $('#share-link-size').textContent = state.shortId ? 'Short link; the answer is kept by the link service' : `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
   return url;
+}
+function sharePayload(result) {
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang } = result;
+  const svg = (result.svg || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  const m = state.model3d;
+  const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, m3d, q: state.query };
 }
 function openShare() {
   if (!state.result) return;
@@ -752,7 +767,21 @@ window.addEventListener('hashchange', () => { /* links are handled on load only 
   renderRecent();
   loadPrices();
   const h = new URLSearchParams(location.hash.slice(1).replace(/^[^=]*\//, ''));
-  const shared = h.get('r');
+  const shared = h.get('r'); const shortId = h.get('s');
+  if (shortId && /^[a-z0-9]{5,12}$/.test(shortId)) {
+    try {
+      startLoading('the shared answer');
+      const res = await fetch(`${LINKS_API}/${shortId}`);
+      if (!res.ok) throw new Error();
+      const r = await res.json();
+      const q = r.q || r.title; delete r.q;
+      $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
+      show(r, q, { free: true, shared: true });
+      state.shortId = shortId;
+      if (r.svg) cachePut(cacheKey(q, r.lang || 'English', $('#level').value), r);
+      return;
+    } catch { showError('This shared link could not be opened. It may have been mistyped, or the link service is unreachable right now.'); }
+  }
   if (shared) {
     try {
       const r = await decodeResult(shared);

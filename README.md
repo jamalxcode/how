@@ -19,7 +19,7 @@ It's a static site on GitHub Pages: no server, no database, nothing to pay for h
    - **Parts** — a slider pulls the drawing apart into an exploded view, each part numbered and named in one line.
    - **Real thing** — photos from the Wikipedia article.
    - **3D** — a Sketchfab model to spin and zoom.
-4. **Share.** The link carries the whole answer (drawing, parts, steps, compressed into the address, usually 3–5 KB), so whoever opens it sees it at once with no sign-in and no AI. *Download report* saves one self-contained HTML file that works offline with the drawing still moving; *Download drawing* saves the SVG. *Draw it again* asks for a fresh drawing.
+4. **Share.** The link is short (`…/#scissors/s=k7x2mq9`): the answer is stored by a tiny link service (a Cloudflare Worker with KV, `worker/worker.js`), and whoever opens it sees it at once with no sign-in and no AI. If the service can't be reached, the link carries the whole answer compressed into the address instead (3–5 KB). *Download report* saves one self-contained HTML file that works offline with the drawing still moving; *Download drawing* saves the SVG. *Draw it again* asks for a fresh drawing.
 
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic.
 
@@ -37,7 +37,7 @@ Question + language + audience
  └─ Sketchfab search API → embedded 3D viewer
 ```
 
-- **Sharing without AI:** the answer is deflated and base64url-encoded into `#r=…`; the page decodes it with `DecompressionStream` and draws it like any other answer.
+- **Sharing without AI:** `#s=<id>` fetches the answer from the link service (same answer → same id, so re-sharing never fills the store); the fallback `#r=…` is the answer deflated and base64url-encoded, decoded with `DecompressionStream`. Either way the page draws it like any other answer.
 - **No AI needed for a repeat:** answers are cached in `localStorage` (last 24), and a built-in demo (`demo.js`) shows the idea without signing in.
 - **Safety:** the SVG is parsed with `DOMParser`, stripped of scripts, foreign objects, images and external links before it touches the page.
 - **Labels** are placed on each part's biggest shape (through any transforms) and nudged apart so they never overlap.
