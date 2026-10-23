@@ -13,7 +13,7 @@ const RTL = /^(arabic|urdu|persian|hebrew)$/i;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const state = { key: null, result: null, query: null, abort: null, cost: 0, prices: {} };
+const state = { key: null, result: null, query: null, abort: null, cost: 0, prices: {}, model3d: null };
 
 const store = {
   get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
@@ -329,7 +329,7 @@ function show(result, q, { free = false, shared = false } = {}) {
 
   // the other tabs load in the background, free of charge
   loadPhotos(result.wikipedia_title || q);
-  load3D(result.search_terms || q);
+  load3D(result.search_terms || q, result.m3d);
 }
 
 function langCode(name) {
@@ -530,37 +530,52 @@ async function loadPhotos(title) {
 }
 
 // ---------- 3D models (Sketchfab) ----------
-async function load3D(terms) {
+async function load3D(terms, known) {
   const box = $('#model3d'); box.innerHTML = '<p class="empty">Looking for a 3D model…</p>';
+  state.model3d = known || null;
   $('#model3d-credit').textContent = '';
   const searchLink = `https://sketchfab.com/search?q=${encodeURIComponent(terms)}&type=models`;
   try {
     const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(terms)}&count=8&sort_by=-likeCount&downloadable=false`);
     if (!res.ok) throw new Error();
     const { results } = await res.json();
-    const models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true);
+    let models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true);
+    if (known?.uid) models = [known, ...models.filter((m) => m.uid !== known.uid)];
     if (!models.length) throw new Error();
     box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><div class="thumbs"></div>';
     const iframe = $('iframe', box); const thumbs = $('.thumbs', box);
     const pick = (m, btn) => {
+      state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: m.viewerUrl || m.url || '', thumb: thumbOf(m) };
       iframe.src = `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
       $$('button', thumbs).forEach((b) => b.classList.toggle('active', b === btn));
-      $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(m.user?.displayName || 'a Sketchfab artist')} on Sketchfab, under its own licence. Drag to spin, pinch or scroll to zoom.`;
-      const a = $('#model3d-credit a'); a.href = m.viewerUrl || `https://sketchfab.com/3d-models/${m.uid}`; a.textContent = m.name;
+      $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(state.model3d.by || 'a Sketchfab artist')} on Sketchfab, under its own licence. Drag to spin, pinch or scroll to zoom.`;
+      const a = $('#model3d-credit a'); a.href = state.model3d.url || `https://sketchfab.com/3d-models/${m.uid}`; a.textContent = m.name;
     };
     models.forEach((m, i) => {
       const b = document.createElement('button'); b.type = 'button';
-      const t = (m.thumbnails?.images || []).sort((x, y) => x.width - y.width).find((x) => x.width >= 200) || m.thumbnails?.images?.[0];
+      const t = thumbOf(m);
       b.innerHTML = `<img alt="" loading="lazy"><span></span>`;
-      if (t) $('img', b).src = t.url;
+      if (t) $('img', b).src = t;
       $('span', b).textContent = m.name;
       b.addEventListener('click', () => pick(m, b));
       thumbs.appendChild(b);
       if (i === 0) pick(m, b);
     });
   } catch {
+    if (known?.uid) {
+      box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div>';
+      $('iframe', box).src = `https://sketchfab.com/models/${known.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
+      $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(known.by || 'a Sketchfab artist')} on Sketchfab, under its own licence.`;
+      const a = $('#model3d-credit a'); a.href = known.url || `https://sketchfab.com/3d-models/${known.uid}`; a.textContent = known.name || '3D model';
+      return;
+    }
     box.innerHTML = `<p class="empty">Couldn't load a 3D model here. <a href="${searchLink}" target="_blank" rel="noopener">Browse models on Sketchfab</a></p>`;
   }
+}
+function thumbOf(m) {
+  if (m.thumb) return m.thumb;
+  const t = (m.thumbnails?.images || []).slice().sort((x, y) => x.width - y.width).find((x) => x.width >= 200) || m.thumbnails?.images?.[0];
+  return t?.url || '';
 }
 function escapeHTML(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -584,8 +599,11 @@ function updateEstimate() {
 // The answer (JSON with the SVG) is deflated and base64url-encoded into #r=…, so a reader
 // needs no sign-in and no AI: the page just unpacks and draws it. Typical link: 3–5 KB.
 async function encodeResult(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang } = result;
-  const json = JSON.stringify({ title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, q: state.query });
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang } = result;
+  const svg = (result.svg || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
+  const m = state.model3d;
+  const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
+  const json = JSON.stringify({ title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, m3d, q: state.query });
   const bytes = new TextEncoder().encode(json);
   let out = bytes, tag = 'u';
   if (typeof CompressionStream !== 'undefined') {
@@ -607,7 +625,7 @@ async function decodeResult(str) {
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
   const base = local ? SITE_URL : location.origin + location.pathname;
-  const url = `${base}#r=${await encodeResult(state.result)}`;
+  const url = `${base}#${encodeURIComponent(fileSlug())}/r=${await encodeResult(state.result)}`;
   $('#share-link-size').textContent = `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
   return url;
 }
@@ -644,6 +662,8 @@ async function buildReport() {
   const steps = (r.steps || []).map((st, i) => `<li><span class="n">${i + 1}</span><b>${esc(st.title)}</b><span>${esc(st.text)}</span></li>`).join('');
   const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
   const sk = `https://sketchfab.com/search?q=${encodeURIComponent(r.search_terms || state.query || '')}&type=models`;
+  const m = state.model3d;
+  const model = m?.uid ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(m.url || 'https://sketchfab.com/3d-models/' + m.uid)}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection; drag to spin).</p>` : '';
   return `<!doctype html><html lang="${langCode(r.lang)}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(r.title)} — How</title>
 <style>
@@ -654,6 +674,9 @@ h1{font-family:Fraunces,Georgia,serif;font-size:clamp(32px,6vw,52px);margin:4px 
 .hook{text-align:center;font-style:italic;color:#4a5263;font-size:19px;max-width:640px;margin:0 auto 18px;font-family:Fraunces,Georgia,serif}
 .stage{border:2px solid #1d2433;border-radius:18px;overflow:hidden;background:#fbf4e4;box-shadow:0 10px 30px -14px rgba(29,36,51,.35)}
 .stage svg{display:block;width:100%;height:auto}
+.stage.three{aspect-ratio:16/10;position:relative;background:#111}
+.stage.three iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.credit{color:#7d8494;font-size:13px;margin:8px 2px 0}.credit a{color:inherit}
 h2{font-family:Fraunces,Georgia,serif;font-size:22px;margin:26px 0 8px}
 ol{list-style:none;margin:0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
 li{background:#f3e9d2;border:1.5px solid #d9cdb2;border-radius:14px;padding:12px 14px 12px 50px;position:relative}
@@ -678,6 +701,7 @@ footer a{color:inherit}
 <h2>Parts</h2><ol>${parts}</ol>
 <h2>Step by step</h2><ol>${steps}</ol>
 ${r.fun_fact ? `<p class="fact"><b>Did you know?</b> ${esc(r.fun_fact)}</p>` : ''}
+${model}
 <div class="links"><a class="main" href="${esc(link)}">Open the interactive version (pull it apart, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
 <footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Drawing by AI; check important details against a trusted source.</footer>
 </main></body></html>`;
@@ -727,7 +751,7 @@ window.addEventListener('hashchange', () => { /* links are handled on load only 
   renderAuth();
   renderRecent();
   loadPrices();
-  const h = new URLSearchParams(location.hash.slice(1));
+  const h = new URLSearchParams(location.hash.slice(1).replace(/^[^=]*\//, ''));
   const shared = h.get('r');
   if (shared) {
     try {
