@@ -383,6 +383,7 @@ function show(result, q, { free = false, shared = false } = {}) {
     parts.appendChild(li);
   });
 
+  setView('works');            // the drawing must be visible before it is measured
   drawSVG(result.svg || '');
   setView('works');
   startTicker();
@@ -442,6 +443,15 @@ function drawSVG(svgText) {
   }
   stage.appendChild(svg);
   svg.addEventListener('click', () => { clearHighlight(); $('#callout').hidden = true; });
+  placeLabels(svg, 0);
+}
+
+// Numbered labels, pull-apart directions and the cropped view all need the drawing to be laid
+// out on screen; if it isn't yet (hidden tab, first paint), try again on the next frames.
+function placeLabels(svg, attempt) {
+  if (!svg.isConnected) return;
+  const rect = svg.getBoundingClientRect();
+  if ((rect.width < 10 || rect.height < 10) && attempt < 30) { requestAnimationFrame(() => placeLabels(svg, attempt + 1)); return; }
 
   // labels: one numbered badge per part on a top layer (so no part can cover them), placed on
   // the part's biggest shape (or where the AI said with data-label="x y"), nudged apart.
@@ -627,6 +637,7 @@ function setView(view) {
   $('#parts').hidden = view !== 'parts';
   clearHighlight(); $('#callout').hidden = true;
   const svg = $('#stage svg');
+  if (view !== 'works') $$('.now', document).forEach((n) => n.classList.remove('now'));
   if (view === 'parts') {
     svg?.classList.add('exploded');
     try { svg?.pauseAnimations(); } catch {}
