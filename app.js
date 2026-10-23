@@ -111,7 +111,7 @@ const SCHEMA = {
       properties: {
         title: { type: 'string' },
         hook: { type: 'string' },
-        kind: { type: 'string', enum: ['object', 'process', 'refused'] },
+        kind: { type: 'string', enum: ['object', 'diagram', 'process', 'refused'] },
         wikipedia_title: { type: 'string' },
         search_terms: { type: 'string' },
         parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'name', 'role', 'color'],
@@ -129,7 +129,8 @@ const SCHEMA = {
 function systemPrompt(lang, level) {
   return `You are the illustrator of a children's "how it works" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
 
-Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 3–7 parts; 3–6 steps. "title" is the thing's name in ${lang}. For a process (e.g. how a house is built, how bread rises) the "parts" are its stages or components and the steps follow them in order; set kind to "process", otherwise "object".
+Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 3–7 parts; 3–6 steps. "title" is the thing's name in ${lang}. "kind": "object" for a thing made of parts that fit together (engine, scissors, can opener): the page lets the reader pull it apart. "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly; how sound travels): parts are the things in the scene and nothing is pulled apart. "process" (how a house is built, how bread rises): the parts are its stages or components and the steps follow them in order.
+Light, air, water, electricity, forces, heat and arrows are NEVER parts: they are drawn as flows in <g id="fx">. A part is a physical thing you could touch.
 "wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
 Timing: the whole animation is ONE cycle of "loop_seconds" (2–8 s). Every animation you write uses dur equal to loop_seconds, or begin/dur values inside it, so the cycle repeats cleanly. Each step gets "at": the percentage (0–100) of the cycle at which that step is happening, increasing from step to step (first step at 0). The page lights up each step as the drawing reaches it.
 
@@ -346,6 +347,7 @@ function show(result, q, { free = false, shared = false } = {}) {
   if (r.getAttribute('dir') === 'rtl') loadArabicFont();
 
   $('#r-kind').textContent = result.kind === 'process' ? 'How it is done' : result.kind === 'refused' ? 'Sorry' : 'How it works';
+  $('#parts-hint').textContent = result.kind === 'diagram' || result.kind === 'process' ? 'Tap a part or a name' : 'Tap a part or a name · drag to pull apart';
   $('#r-title').textContent = result.title || q;
   $('#r-hook').textContent = result.hook || '';
   $('#fact').textContent = result.fun_fact || '';
@@ -638,10 +640,12 @@ function setView(view) {
   clearHighlight(); $('#callout').hidden = true;
   const svg = $('#stage svg');
   if (view !== 'works') $$('.now', document).forEach((n) => n.classList.remove('now'));
+  const diagram = state.result?.kind === 'diagram' || state.result?.kind === 'process';
+  $('#explode').parentElement.hidden = diagram;
   if (view === 'parts') {
     svg?.classList.add('exploded');
     try { svg?.pauseAnimations(); } catch {}
-    explode($('#explode').value / 100);
+    explode(diagram ? 0 : $('#explode').value / 100);
   } else if (view === 'works') {
     svg?.classList.remove('exploded');
     explode(0);
