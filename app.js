@@ -683,6 +683,11 @@ async function loadPhotos(title) {
   }
 }
 
+// Wikipedia's media list points at thumb.wikimedia.org with tracking parameters meant for its own
+// pages; that host refuses other sites. upload.wikimedia.org serves the same files to anyone.
+function wikiImageUrl(src) {
+  return ('https:' + String(src).replace(/^https?:/, '')).replace(/^https:\/\/thumb\.wikimedia\.org\//, 'https://upload.wikimedia.org/').split('?')[0];
+}
 // Straight from the browser, when the link service can't be reached.
 async function wikiDirect(title) {
   let page = title;
@@ -693,7 +698,7 @@ async function wikiDirect(title) {
   if (!res.ok) throw new Error(`Wikipedia answered ${res.status}`);
   const { items } = await res.json();
   const pics = (items || []).filter((it) => it.type === 'image' && it.srcset?.length && !BAD_IMAGE.test(it.title)).slice(0, 9)
-    .map((it) => { const small = 'https:' + it.srcset[0].src.replace(/^https?:/, ''); return { src: small.replace(/\/(\d+)px-/, '/720px-'), small, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }; });
+    .map((it) => { const small = wikiImageUrl(it.srcset[0].src); return { src: small.replace(/\/(\d+)px-/, '/720px-'), small, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }; });
   return { page, url: `https://en.wikipedia.org/wiki/${enc}`, pics };
 }
 

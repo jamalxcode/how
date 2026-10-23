@@ -27,6 +27,11 @@ const isAdmin = (req, env) => !!env.ADMIN_SECRET && req.headers.get('X-Admin') =
 
 // Wikipedia: pick the pictures that show the thing, not flags, maps and icons.
 const BAD_IMAGE = /icon|logo|commons-|wiki|edit-|question_book|symbol|flag_of|ambox|disambig|padlock|speaker|sound-|nuvola|crystal_clear|\.ogv|\.webm|\.ogg|\.mid|locator|coat_of_arms|seal_of|emblem|_map|map_of|chart|graph_|plot/i;
+// Wikipedia's media list points at thumb.wikimedia.org with tracking parameters meant for its own
+// pages; that host refuses other sites. upload.wikimedia.org serves the same files to anyone.
+function wikiImageUrl(src) {
+  return ('https:' + String(src).replace(/^https?:/, '')).replace(/^https:\/\/thumb\.wikimedia\.org\//, 'https://upload.wikimedia.org/').split('?')[0];
+}
 async function wiki(title) {
   const h = { 'User-Agent': UA, Accept: 'application/json' };
   const s = await (await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=1&format=json`, { headers: h })).json();
@@ -42,7 +47,7 @@ async function wiki(title) {
   // photos first, drawings (svg) after, captioned ones before uncaptioned
   items.sort((a, b) => (/\.svg$/i.test(a.title) - /\.svg$/i.test(b.title)) || (!!b.caption - !!a.caption));
   for (const it of items) {
-    const small = 'https:' + it.srcset[0].src.replace(/^https?:/, '');
+    const small = wikiImageUrl(it.srcset[0].src);
     const src = small.replace(/\/(\d+)px-/, '/720px-');
     pics.push({ src, small, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') });
   }
