@@ -42,8 +42,9 @@ async function wiki(title) {
   // photos first, drawings (svg) after, captioned ones before uncaptioned
   items.sort((a, b) => (/\.svg$/i.test(a.title) - /\.svg$/i.test(b.title)) || (!!b.caption - !!a.caption));
   for (const it of items) {
-    const src = ('https:' + it.srcset[0].src.replace(/^https?:/, '')).replace(/\/(\d+)px-/, '/720px-');
-    pics.push({ src, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') });
+    const small = 'https:' + it.srcset[0].src.replace(/^https?:/, '');
+    const src = small.replace(/\/(\d+)px-/, '/720px-');
+    pics.push({ src, small, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') });
   }
   if (leadSrc) {
     const i = pics.findIndex((p) => p.src.split('/').pop().replace(/^\d+px-/, '') === leadSrc.split('/').pop());

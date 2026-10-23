@@ -663,11 +663,14 @@ async function loadPhotos(title) {
     let failed = 0;
     data.pics.forEach((it, i) => {
       const fig = document.createElement('figure'); if (i === 0) fig.className = 'wide';
-      const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = it.src; img.alt = it.caption;
+      const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.alt = it.caption;
+      const tries = [it.src, it.small].filter((u, k, arr) => u && arr.indexOf(u) === k);
+      img.src = tries.shift();
       img.addEventListener('error', () => {
+        if (tries.length) { img.src = tries.shift(); return; }
         failed++;
         fig.classList.add('broken');
-        if (failed === data.pics.length) box.insertAdjacentHTML('afterbegin', `<p class="empty">The photos exist but would not load here. <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">See them on Wikipedia</a></p>`);
+        if (failed === data.pics.length) box.insertAdjacentHTML('afterbegin', `<p class="empty">The photos exist but would not load here. <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">See them on Wikipedia</a><br><small>First one tried: <a href="${escapeHTML(data.pics[0].src)}" target="_blank" rel="noopener">${escapeHTML(data.pics[0].src)}</a></small></p>`);
       });
       const cap = document.createElement('figcaption'); cap.textContent = it.caption;
       fig.append(img, cap);
@@ -690,7 +693,7 @@ async function wikiDirect(title) {
   if (!res.ok) throw new Error(`Wikipedia answered ${res.status}`);
   const { items } = await res.json();
   const pics = (items || []).filter((it) => it.type === 'image' && it.srcset?.length && !BAD_IMAGE.test(it.title)).slice(0, 9)
-    .map((it) => ({ src: ('https:' + it.srcset[0].src.replace(/^https?:/, '')).replace(/\/(\d+)px-/, '/720px-'), caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }));
+    .map((it) => { const small = 'https:' + it.srcset[0].src.replace(/^https?:/, ''); return { src: small.replace(/\/(\d+)px-/, '/720px-'), small, caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }; });
   return { page, url: `https://en.wikipedia.org/wiki/${enc}`, pics };
 }
 
