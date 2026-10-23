@@ -129,7 +129,8 @@ const SCHEMA = {
 function systemPrompt(lang, level) {
   return `You are the illustrator of a children's "how it works" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
 
-Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 3–7 parts; 3–6 steps. "title" is the thing's name in ${lang}. "kind": "object" for a thing made of parts that fit together (engine, scissors, can opener): the page lets the reader pull it apart. "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly; how sound travels): parts are the things in the scene and nothing is pulled apart. "process" (how a house is built, how bread rises): the parts are its stages or components and the steps follow them in order.
+Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 4–8 parts; 3–6 steps.
+Choose the parts by what makes the thing DO its job, not by what is easiest to draw: the parts a curious person would ask about first. Include the hidden ones that matter (a phone: antenna and radio chip, microphone, speaker; a fridge: compressor and refrigerant loop; a car engine: spark plug and valves). The function the thing is named for must be visible in the parts and the steps. "title" is the thing's name in ${lang}. "kind": "object" for a thing made of parts that fit together (engine, scissors, can opener): the page lets the reader pull it apart. "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly; how sound travels): parts are the things in the scene and nothing is pulled apart. "process" (how a house is built, how bread rises): the parts are its stages or components and the steps follow them in order.
 Light, air, water, electricity, forces, heat and arrows are NEVER parts: they are drawn as flows in <g id="fx">. A part is a physical thing you could touch.
 "wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
 Timing: the whole animation is ONE cycle of "loop_seconds" (2–8 s). Every animation you write uses dur equal to loop_seconds, or begin/dur values inside it, so the cycle repeats cleanly. Each step gets "at": the percentage (0–100) of the cycle at which that step is happening, increasing from step to step (first step at 0). The page lights up each step as the drawing reaches it.
@@ -147,7 +148,7 @@ Draw accurately: real proportions, the real arrangement of parts, the real motio
 async function askAI(q, lang, level, model, signal, feedback) {
   const messages = [
     { role: 'system', content: systemPrompt(lang, level) },
-    { role: 'user', content: `Show me how this works: ${q}` + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
+    { role: 'user', content: `Show me how this works: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '') + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
   ];
   let text;
   try {
@@ -381,6 +382,9 @@ function show(result, q, { free = false, shared = false } = {}) {
     const num = li.querySelector('.num'); num.textContent = i + 1; num.style.background = safeColor(p.color);
     li.querySelector('strong').textContent = p.name;
     li.querySelector('span:not(.num)').textContent = p.role;
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'ask-more'; more.textContent = 'How does this work? →';
+    more.addEventListener('click', (e) => { e.stopPropagation(); followUp(p.name); });
+    li.appendChild(more);
     li.addEventListener('click', () => { highlight([p.id], li); openCallout(p.id); });
     parts.appendChild(li);
   });
@@ -574,6 +578,7 @@ function openCallout(id) {
   const p = partsById[id]; if (!p) return;
   $('#callout-num').textContent = p.n; $('#callout-num').style.background = safeColor(p.color);
   $('#callout-name').textContent = p.name; $('#callout-role').textContent = p.role;
+  $('#callout-more').onclick = () => followUp(p.name);
   $('#callout').hidden = false;
 }
 
@@ -904,6 +909,15 @@ ${model}
 <div class="links"><a class="main" href="${esc(link)}">Open the interactive version (pull it apart, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
 <footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Drawing by AI; check important details against a trusted source.</footer>
 </main></body></html>`;
+}
+
+// A follow-up question about one part, in the same language and for the same audience,
+// with the thing it belongs to for context.
+function followUp(partName) {
+  const parent = state.result?.title || state.query || '';
+  const q = parent ? `${partName} (of ${parent})` : partName;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  ask(q);
 }
 
 // ---------- gallery (curated answers, free to open) and the live drawing on the home page ----------

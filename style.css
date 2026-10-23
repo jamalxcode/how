@@ -311,3 +311,9 @@ body.has-result .hero-sub { display: none; }
 .steps li.now .num { background: var(--red); color: #fff; }
 .stage-canvas svg [data-part].now { filter: drop-shadow(0 0 6px rgba(228,87,46,.9)); }
 .stage-canvas svg.dim [data-part].now { filter: none; }
+
+/* ---- follow-up questions ---- */
+.ask-more { display: block; margin-top: 6px; background: none; border: 0; padding: 0; color: var(--red); font-weight: 800; font-size: 13px; text-align: left; }
+.ask-more:hover { text-decoration: underline; }
+.ask-more-light { color: var(--mustard); }
+.result[dir="rtl"] .ask-more { text-align: right; }
