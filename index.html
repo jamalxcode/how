@@ -3,25 +3,25 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Tell Me Why · How does it work?</title>
+  <title>How · How does it work?</title>
   <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: an animated diagram, the parts pulled apart, real photos and a 3D model, in your language.">
   <meta name="theme-color" content="#fbf4e4">
   <link rel="icon" href="logo.svg" type="image/svg+xml">
-  <meta property="og:title" content="Tell Me Why · How does it work?">
+  <meta property="og:title" content="How · How does it work?">
   <meta property="og:description" content="Type a thing. See how it works — animated, pulled apart, in your language.">
   <meta property="og:url" content="https://how.sala.company/">
   
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 
 <header class="top">
-  <a class="brand" href="./" aria-label="Tell Me Why home">
+  <a class="brand" href="./" aria-label="How home">
     <img src="logo.svg" alt="" width="40" height="40">
-    <span class="brand-name">Tell Me <em>Why</em></span>
+    <span class="brand-name"><em>How</em><span class="brand-q">?</span></span>
   </a>
   <div class="top-right">
     <div id="auth" class="auth">
@@ -137,6 +137,7 @@
   </section>
 
   <section id="result" class="result" hidden>
+    <p class="shared-note" id="shared-note" hidden>Someone shared this answer with you. <a href="./">Ask your own →</a></p>
     <header class="result-head">
       <p class="eyebrow" id="r-kind">How it works</p>
       <h2 id="r-title"></h2>
@@ -194,15 +195,14 @@
 
     <footer class="result-foot">
       <span id="cost"></span>
+      <button type="button" class="btn btn-primary btn-sm" id="share">↗ Share</button>
       <button type="button" class="link" id="redraw">Draw it again</button>
-      <button type="button" class="link" id="share">Copy link</button>
-      <button type="button" class="link" id="download">Download drawing</button>
     </footer>
   </section>
 </main>
 
 <footer class="foot">
-  <p>Tell Me Why is a free, static page: your OpenRouter account pays the AI, nothing is stored on this site. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
+  <p>How is a free, static page: your OpenRouter account pays the AI, nothing is stored on this site. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
     <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
 </footer>
 
@@ -217,6 +217,19 @@
   <form method="dialog"><button class="btn btn-primary btn-sm">OK</button></form>
 </dialog>
 
+<dialog id="share-dialog" class="dialog">
+  <h3>Share this answer</h3>
+  <p class="share-lead">The link carries the whole answer — drawing, parts and steps — so whoever opens it sees it at once, with no sign-in and no AI.</p>
+  <div class="share-grid">
+    <button type="button" class="share-opt" id="share-link"><strong>Copy link</strong><span id="share-link-size">Everything inside the address</span></button>
+    <button type="button" class="share-opt" id="share-native" hidden><strong>Send…</strong><span>WhatsApp, mail, messages</span></button>
+    <button type="button" class="share-opt" id="share-report"><strong>Download report</strong><span>One HTML file that works offline</span></button>
+    <button type="button" class="share-opt" id="share-svg"><strong>Download drawing</strong><span>The animated SVG on its own</span></button>
+  </div>
+  <p id="share-status" class="hint"></p>
+  <form method="dialog" class="dialog-actions"><button class="btn btn-ghost btn-sm">Close</button></form>
+</dialog>
+
 <dialog id="key-dialog" class="dialog">
   <h3>Use an OpenRouter API key</h3>
   <p>Create one at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>. It stays in this browser only.</p>
@@ -229,8 +242,8 @@
   </form>
 </dialog>
 
-<script src="demo.js?v=1"></script>
-<script src="app.js?v=1"></script>
+<script src="demo.js?v=2"></script>
+<script src="app.js?v=2"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

@@ -1,10 +1,11 @@
-// Tell Me Why — type a thing, see how it works.
+// How — type a thing, see how it works.
 // Static page: the AI (Claude, via OpenRouter, paid by the visitor) returns a JSON "explainer"
 // with an animated SVG; this file draws it, pulls it apart, and adds Wikipedia photos and Sketchfab 3D.
 'use strict';
 
 const OPENROUTER = 'https://openrouter.ai';
-const APP_TITLE = 'Tell Me Why';
+const APP_TITLE = 'How';
+const SITE_URL = 'https://how.sala.company/';
 const CACHE_KEY = 'tmw_cache_v1';
 const CACHE_MAX = 24;
 const RTL = /^(arabic|urdu|persian|hebrew)$/i;
@@ -124,7 +125,7 @@ const SCHEMA = {
 };
 
 function systemPrompt(lang, level) {
-  return `You are the illustrator of a "Tell Me Why" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
+  return `You are the illustrator of a children's "how it works" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
 
 Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 3–7 parts; 3–6 steps. "title" is the thing's name in ${lang}. For a process (e.g. how a house is built, how bread rises) the "parts" are its stages or components and the steps follow them in order; set kind to "process", otherwise "object".
 "wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
@@ -280,7 +281,7 @@ async function ask(q, { force = false } = {}) {
 
 // ---------- rendering ----------
 let partsById = {};
-function show(result, q, { free = false } = {}) {
+function show(result, q, { free = false, shared = false } = {}) {
   state.result = result; state.query = q;
   stopLoading();
   $('#error').hidden = true;
@@ -295,7 +296,8 @@ function show(result, q, { free = false } = {}) {
   $('#r-title').textContent = result.title || q;
   $('#r-hook').textContent = result.hook || '';
   $('#fact').textContent = result.fun_fact || '';
-  $('#cost').textContent = free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
+  $('#shared-note').hidden = !shared;
+  $('#cost').textContent = shared ? '' : free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
 
   partsById = {};
   (result.parts || []).forEach((p, i) => { partsById[p.id] = { ...p, n: i + 1 }; });
@@ -578,6 +580,109 @@ function updateEstimate() {
   $('#estimate').textContent = cost ? `About $${cost.toFixed(2)} per new drawing, charged to your OpenRouter account. Reopening an answer is free.` : '';
 }
 
+// ---------- sharing: the whole answer travels inside the link ----------
+// The answer (JSON with the SVG) is deflated and base64url-encoded into #r=…, so a reader
+// needs no sign-in and no AI: the page just unpacks and draws it. Typical link: 3–5 KB.
+async function encodeResult(result) {
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang } = result;
+  const json = JSON.stringify({ title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, q: state.query });
+  const bytes = new TextEncoder().encode(json);
+  let out = bytes, tag = 'u';
+  if (typeof CompressionStream !== 'undefined') {
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+    out = new Uint8Array(await new Response(stream).arrayBuffer()); tag = 'd';
+  }
+  return tag + b64url(out);
+}
+async function decodeResult(str) {
+  const tag = str[0]; const b64 = str.slice(1).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64); const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  let json;
+  if (tag === 'd') {
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    json = await new Response(stream).text();
+  } else json = new TextDecoder().decode(bytes);
+  return JSON.parse(json);
+}
+async function shareUrl() {
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
+  const base = local ? SITE_URL : location.origin + location.pathname;
+  const url = `${base}#r=${await encodeResult(state.result)}`;
+  $('#share-link-size').textContent = `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
+  return url;
+}
+function openShare() {
+  if (!state.result) return;
+  $('#share-status').textContent = '';
+  $('#share-native').hidden = !navigator.share;
+  shareUrl();
+  $('#share-dialog').showModal();
+}
+function shareStatus(msg) { $('#share-status').textContent = msg; }
+function fileSlug() { return (state.result?.title || 'how').replace(/[^\p{L}\p{N}-]+/gu, '-').replace(/^-|-$/g, '').toLowerCase() || 'how'; }
+function downloadBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+// The drawing as shown (with numbered labels), un-exploded, as a standalone SVG string.
+function currentSVG() {
+  const svg = $('#stage svg'); if (!svg) return '';
+  const clone = svg.cloneNode(true);
+  $$('[data-part]', clone).forEach((w) => { w.removeAttribute('style'); w.classList.remove('hot'); });
+  clone.classList.remove('dim', 'exploded');
+  if (svg.dataset.vb) clone.setAttribute('viewBox', svg.dataset.vb);
+  clone.removeAttribute('class');
+  return new XMLSerializer().serializeToString(clone);
+}
+// One self-contained HTML file: the drawing (still animated), parts, steps, fact, links, and a
+// link back to the interactive version. Opens anywhere, offline, no scripts.
+async function buildReport() {
+  const r = state.result; const esc = escapeHTML;
+  const rtl = RTL.test(r.lang || '');
+  const link = await shareUrl();
+  const parts = (r.parts || []).map((p, i) => `<li><span class="n" style="background:${safeColor(p.color)}">${i + 1}</span><b>${esc(p.name)}</b><span>${esc(p.role)}</span></li>`).join('');
+  const steps = (r.steps || []).map((st, i) => `<li><span class="n">${i + 1}</span><b>${esc(st.title)}</b><span>${esc(st.text)}</span></li>`).join('');
+  const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
+  const sk = `https://sketchfab.com/search?q=${encodeURIComponent(r.search_terms || state.query || '')}&type=models`;
+  return `<!doctype html><html lang="${langCode(r.lang)}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(r.title)} — How</title>
+<style>
+body{margin:0;background:#fbf4e4;color:#1d2433;font:17px/1.5 Nunito,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:min(100% - 32px,900px);margin:0 auto;padding:24px 0 40px}
+.eyebrow{margin:0;text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:800;color:#1f8a8a;text-align:center}
+h1{font-family:Fraunces,Georgia,serif;font-size:clamp(32px,6vw,52px);margin:4px 0 6px;text-align:center;line-height:1.05}
+.hook{text-align:center;font-style:italic;color:#4a5263;font-size:19px;max-width:640px;margin:0 auto 18px;font-family:Fraunces,Georgia,serif}
+.stage{border:2px solid #1d2433;border-radius:18px;overflow:hidden;background:#fbf4e4;box-shadow:0 10px 30px -14px rgba(29,36,51,.35)}
+.stage svg{display:block;width:100%;height:auto}
+h2{font-family:Fraunces,Georgia,serif;font-size:22px;margin:26px 0 8px}
+ol{list-style:none;margin:0;padding:0;display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+li{background:#f3e9d2;border:1.5px solid #d9cdb2;border-radius:14px;padding:12px 14px 12px 50px;position:relative}
+[dir=rtl] li{padding:12px 50px 12px 14px}
+.n{position:absolute;left:12px;top:12px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:14px;background:#1d2433;color:#fff}
+[dir=rtl] .n{left:auto;right:12px}
+li b{display:block;font-family:Fraunces,Georgia,serif;font-size:17px}
+li span:not(.n){color:#4a5263;font-size:15px}
+.fact{margin:22px 0 0;padding:14px 18px;border-left:5px solid #e8b43a;background:#f3e9d2;border-radius:0 14px 14px 0;color:#4a5263}
+[dir=rtl] .fact{border-left:0;border-right:5px solid #e8b43a;border-radius:14px 0 0 14px}
+.fact b{color:#1d2433}
+.links{margin-top:22px;display:flex;flex-wrap:wrap;gap:8px}
+.links a{border:2px solid #1d2433;border-radius:999px;padding:8px 14px;text-decoration:none;color:#1d2433;font-weight:800;font-size:14px}
+.links a.main{background:#e4572e;border-color:#e4572e;color:#fff}
+footer{margin-top:30px;text-align:center;color:#7d8494;font-size:13px}
+footer a{color:inherit}
+</style></head><body><main>
+<p class="eyebrow">${r.kind === 'process' ? 'How it is done' : 'How it works'}</p>
+<h1>${esc(r.title)}</h1>
+<p class="hook">${esc(r.hook || '')}</p>
+<div class="stage">${currentSVG()}</div>
+<h2>Parts</h2><ol>${parts}</ol>
+<h2>Step by step</h2><ol>${steps}</ol>
+${r.fun_fact ? `<p class="fact"><b>Did you know?</b> ${esc(r.fun_fact)}</p>` : ''}
+<div class="links"><a class="main" href="${esc(link)}">Open the interactive version (pull it apart, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
+<footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Drawing by AI; check important details against a trusted source.</footer>
+</main></body></html>`;
+}
+
 // ---------- wiring ----------
 $('#ask').addEventListener('submit', (e) => { e.preventDefault(); ask($('#q').value); });
 $$('.chip', $('#chips')).forEach((c) => c.addEventListener('click', () => { if (c.classList.contains('chip-demo')) $('#lang').value = 'English'; ask(c.dataset.q); }));
@@ -591,16 +696,24 @@ $('#play').addEventListener('click', () => setPlaying(!playing));
 $('#explode').addEventListener('input', (e) => explode(e.target.value / 100));
 $('#callout-close').addEventListener('click', () => { $('#callout').hidden = true; clearHighlight(); });
 $('#redraw').addEventListener('click', () => ask(state.query, { force: true }));
-$('#share').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(location.href); $('#share').textContent = 'Link copied'; setTimeout(() => { $('#share').textContent = 'Copy link'; }, 1500); } catch {}
+$('#share').addEventListener('click', openShare);
+$('#share-link').addEventListener('click', async () => {
+  const url = await shareUrl();
+  try { await navigator.clipboard.writeText(url); shareStatus('Link copied. Anyone who opens it sees this answer, no sign-in needed.'); }
+  catch { prompt('Copy this link:', url); }
 });
-$('#download').addEventListener('click', () => {
-  const svg = $('#stage svg'); if (!svg) return;
-  const clone = svg.cloneNode(true);
-  $$('[data-part]', clone).forEach((w) => { w.style.transform = ''; });
-  const blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${(state.result?.title || 'drawing').replace(/[^\w؀-ۿ-]+/g, '-')}.svg`; a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+$('#share-native').addEventListener('click', async () => {
+  const url = await shareUrl();
+  try { await navigator.share({ title: `${state.result?.title} — How`, text: state.result?.hook || '', url }); } catch {}
+});
+$('#share-report').addEventListener('click', async () => {
+  const html = await buildReport();
+  downloadBlob(new Blob([html], { type: 'text/html' }), `${fileSlug()}-how.html`);
+  shareStatus('Report saved. It opens in any browser, offline, with the drawing moving.');
+});
+$('#share-svg').addEventListener('click', () => {
+  downloadBlob(new Blob([currentSVG()], { type: 'image/svg+xml' }), `${fileSlug()}.svg`);
+  shareStatus('Drawing saved.');
 });
 $('#privacy').addEventListener('click', () => $('#privacy-dialog').showModal());
 $('#paste-key').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
@@ -615,6 +728,17 @@ window.addEventListener('hashchange', () => { /* links are handled on load only 
   renderRecent();
   loadPrices();
   const h = new URLSearchParams(location.hash.slice(1));
+  const shared = h.get('r');
+  if (shared) {
+    try {
+      const r = await decodeResult(shared);
+      const q = r.q || r.title; delete r.q;
+      $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
+      show(r, q, { free: true, shared: true });
+      if (r.svg) cachePut(cacheKey(q, r.lang || 'English', $('#level').value), r);
+      return;
+    } catch { showError('This shared link is damaged or incomplete. Ask the sender to share it again.'); }
+  }
   const q = h.get('q'); const lang = h.get('lang');
   if (lang && $(`#lang option[value="${CSS.escape(lang)}"]`)) $('#lang').value = lang;
   const pending = store.get('pending_q', sessionStorage);

@@ -1,6 +1,6 @@
 <img src="logo.svg" width="72" align="left" alt="">
 
-# Tell Me Why
+# How
 
 **Live: [how.sala.company](https://how.sala.company)** · part of [Sala Company](https://go.sala.company)
 
@@ -19,7 +19,7 @@ It's a static site on GitHub Pages: no server, no database, nothing to pay for h
    - **Parts** — a slider pulls the drawing apart into an exploded view, each part numbered and named in one line.
    - **Real thing** — photos from the Wikipedia article.
    - **3D** — a Sketchfab model to spin and zoom.
-4. *Draw it again* asks for a fresh drawing, *Copy link* shares the question, *Download drawing* saves the SVG.
+4. **Share.** The link carries the whole answer (drawing, parts, steps, compressed into the address, usually 3–5 KB), so whoever opens it sees it at once with no sign-in and no AI. *Download report* saves one self-contained HTML file that works offline with the drawing still moving; *Download drawing* saves the SVG. *Draw it again* asks for a fresh drawing.
 
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic.
 
@@ -37,6 +37,7 @@ Question + language + audience
  └─ Sketchfab search API → embedded 3D viewer
 ```
 
+- **Sharing without AI:** the answer is deflated and base64url-encoded into `#r=…`; the page decodes it with `DecompressionStream` and draws it like any other answer.
 - **No AI needed for a repeat:** answers are cached in `localStorage` (last 24), and a built-in demo (`demo.js`) shows the idea without signing in.
 - **Safety:** the SVG is parsed with `DOMParser`, stripped of scripts, foreign objects, images and external links before it touches the page.
 - **Labels** are placed on each part's biggest shape (through any transforms) and nudged apart so they never overlap.

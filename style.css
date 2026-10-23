@@ -1,4 +1,4 @@
-/* Tell Me Why — a picture-encyclopedia look: cream paper, ink lines, a few bold colours. */
+/* How — a picture-encyclopedia look: cream paper, ink lines, a few bold colours. */
 :root {
   --paper: #fbf4e4;
   --paper-2: #f3e9d2;
@@ -61,6 +61,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
 .brand-name { font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: -.01em; }
 .brand-name em { font-style: italic; color: var(--red); }
+.brand-q { color: var(--teal); font-weight: 900; }
 .auth { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .signed { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
 .signed .dot { width: 8px; height: 8px; border-radius: 50%; background: #27a86c; box-shadow: 0 0 0 3px rgba(39,168,108,.2); }
@@ -261,3 +262,14 @@ body.has-result .hero-sub { display: none; }
   .callout { animation: none; }
   .stage-canvas svg.exploded [data-part] { transition: none; }
 }
+
+/* ---- sharing ---- */
+.share-lead { margin: 0 0 12px; color: var(--ink-2); font-size: 15px; }
+.share-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.share-opt { text-align: left; border: 2px solid var(--line); background: var(--paper-2); border-radius: 14px; padding: 12px 14px; }
+.share-opt:hover { border-color: var(--ink); }
+.share-opt strong { display: block; font-family: var(--font-display); font-size: 17px; }
+.share-opt span { display: block; color: var(--muted); font-size: 13px; }
+.shared-note { margin: 0 0 14px; text-align: center; background: var(--paper-2); border: 1.5px dashed var(--line); border-radius: 999px; padding: 8px 16px; font-size: 14px; color: var(--ink-2); }
+.shared-note a { color: var(--red); font-weight: 800; text-decoration: none; }
+@media (max-width: 560px) { .share-grid { grid-template-columns: 1fr; } }
