@@ -647,20 +647,25 @@ async function loadPhotos(title) {
     let data = null;
     try { const r = await fetch(`${LINKS_API}/wiki?t=${encodeURIComponent(title)}`); if (r.ok) data = await r.json(); } catch {}
     if (!data?.pics?.length) data = await wikiDirect(title);
-    if (!data.pics.length) throw new Error();
+    if (!data.pics.length) throw new Error('the article has no usable pictures');
     box.innerHTML = '';
+    let failed = 0;
     data.pics.forEach((it, i) => {
       const fig = document.createElement('figure'); if (i === 0) fig.className = 'wide';
-      const img = document.createElement('img'); img.loading = 'lazy'; img.src = it.src; img.alt = it.caption;
-      img.addEventListener('error', () => fig.remove());
+      const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.src = it.src; img.alt = it.caption;
+      img.addEventListener('error', () => {
+        failed++;
+        fig.classList.add('broken');
+        if (failed === data.pics.length) box.insertAdjacentHTML('afterbegin', `<p class="empty">The photos exist but would not load here. <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">See them on Wikipedia</a></p>`);
+      });
       const cap = document.createElement('figcaption'); cap.textContent = it.caption;
       fig.append(img, cap);
       box.appendChild(fig);
     });
     $('#gallery-credit').innerHTML = `Photos from the Wikipedia article <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener"></a>, each under its own licence.`;
     $('#gallery-credit a').textContent = data.page;
-  } catch {
-    box.innerHTML = `<p class="empty">No photos found. <a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(title)}" target="_blank" rel="noopener">Search Wikipedia</a></p>`;
+  } catch (e) {
+    box.innerHTML = `<p class="empty">No photos found${e?.message ? ` (${escapeHTML(e.message)})` : ''}. <a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(title)}" target="_blank" rel="noopener">Search Wikipedia</a></p>`;
   }
 }
 
@@ -671,7 +676,7 @@ async function wikiDirect(title) {
   if (s.query?.search?.[0]) page = s.query.search[0].title;
   const enc = encodeURIComponent(page.replace(/ /g, '_'));
   const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/media-list/${enc}`);
-  if (!res.ok) throw new Error();
+  if (!res.ok) throw new Error(`Wikipedia answered ${res.status}`);
   const { items } = await res.json();
   const pics = (items || []).filter((it) => it.type === 'image' && it.srcset?.length && !BAD_IMAGE.test(it.title)).slice(0, 9)
     .map((it) => ({ src: ('https:' + it.srcset[0].src.replace(/^https?:/, '')).replace(/\/(\d+)px-/, '/720px-'), caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }));
@@ -688,10 +693,12 @@ async function load3D(terms, known) {
     let models = null;
     try { const r = await fetch(`${LINKS_API}/3d?q=${encodeURIComponent(terms)}`); if (r.ok) models = (await r.json()).models; } catch {}
     if (!models?.length) {
-      const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(terms)}&count=8&sort_by=-likeCount&downloadable=false`);
+      const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(terms)}&count=24&downloadable=false`);
       if (!res.ok) throw new Error();
       const { results } = await res.json();
-      models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true);
+      const words = terms.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+      const score = (m) => words.filter((w) => (m.name || '').toLowerCase().includes(w)).length;
+      models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true).map((m, i) => ({ m, i, s: score(m) })).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, 8).map(({ m }) => m);
     }
     if (known?.uid) models = [known, ...models.filter((m) => m.uid !== known.uid)];
     if (!models.length) throw new Error();

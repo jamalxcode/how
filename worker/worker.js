@@ -53,10 +53,15 @@ async function wiki(title) {
 }
 
 async function sketchfab(q) {
-  const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(q)}&count=8&sort_by=-likeCount&downloadable=false`, { headers: { 'User-Agent': UA } });
+  // relevance order (not "most liked": the most-liked "electric motor" is an electric car),
+  // and models whose name mentions the thing come first
+  const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(q)}&count=24&downloadable=false`, { headers: { 'User-Agent': UA } });
   if (!res.ok) throw new Error(`sketchfab ${res.status}`);
   const { results } = await res.json();
-  const models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true).map((m) => {
+  const words = q.toLowerCase().split(/\W+/).filter((w) => w.length > 2);
+  const score = (m) => { const n = (m.name || '').toLowerCase(); const tags = (m.tags || []).map((t) => (t.name || t.slug || '').toLowerCase()).join(' '); return words.filter((w) => n.includes(w)).length * 2 + words.filter((w) => tags.includes(w)).length; };
+  const models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true).map((m, i) => ({ m, i, s: score(m) }))
+    .sort((a, b) => b.s - a.s || a.i - b.i).slice(0, 8).map(({ m }) => m).map((m) => {
     const t = (m.thumbnails?.images || []).slice().sort((x, y) => x.width - y.width).find((x) => x.width >= 200) || m.thumbnails?.images?.[0];
     return { uid: m.uid, name: m.name, by: m.user?.displayName || '', url: m.viewerUrl || `https://sketchfab.com/3d-models/${m.uid}`, thumb: t?.url || '' };
   });
