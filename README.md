@@ -23,6 +23,8 @@ It's a static site on GitHub Pages: no server, no database, nothing to pay for h
 
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic.
 
+The home page opens with a moving drawing under the headline and a **Browse answers** gallery of curated answers, free to open without signing in.
+
 ## How it works
 
 ```
@@ -37,6 +39,10 @@ Question + language + audience
  └─ Sketchfab search API → embedded 3D viewer
 ```
 
+- **The drawing is checked before it's shown:** the SVG must parse, every listed part must exist and be visible, something must move, and parts need a pull-apart direction. If a check fails the page asks the AI once more with the list of problems and keeps the better drawing. Missing pull-apart directions are filled in radially, and all directions are pushed out until the exploded pieces stop overlapping.
+- **Steps follow the motion:** the AI gives each step a position in the animation cycle (`at`, 0–100 %) and the cycle length (`loop_seconds`); the page reads the SVG's own clock and lights up the current step and its parts. Tapping a step jumps the animation there.
+- **Photos and 3D go through the link service** (`/wiki`, `/3d`), which ranks Wikipedia pictures (lead image first, photos before diagrams, no flags/maps/icons) and caches both for a day; the page falls back to calling Wikipedia and Sketchfab directly.
+- **Gallery:** the service keeps a curated list (`/gallery`). Open the page once with `#admin=<ADMIN_SECRET>` and an *Add to gallery* button appears under every answer.
 - **Sharing without AI:** `#s=<id>` fetches the answer from the link service (same answer → same id, so re-sharing never fills the store); the fallback `#r=…` is the answer deflated and base64url-encoded, decoded with `DecompressionStream`. Either way the page draws it like any other answer.
 - **No AI needed for a repeat:** answers are cached in `localStorage` (last 24), and a built-in demo (`demo.js`) shows the idea without signing in.
 - **Safety:** the SVG is parsed with `DOMParser`, stripped of scripts, foreign objects, images and external links before it touches the page.
@@ -51,6 +57,7 @@ Question + language + audience
 | `style.css` | picture-encyclopedia look (cream paper, ink lines), dark mode, RTL, mobile |
 | `app.js` | OpenRouter sign-in, the prompt and JSON schema, drawing/explode/labels, Wikipedia and Sketchfab |
 | `demo.js` | built-in answers that need no AI (scissors) |
+| `worker/worker.js` | the link service: short links, gallery, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
 | `logo.svg` | gear-with-a-question-mark badge, also the favicon |
 
 ## Privacy

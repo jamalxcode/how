@@ -14,7 +14,7 @@ const RTL = /^(arabic|urdu|persian|hebrew)$/i;
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const state = { key: null, result: null, query: null, abort: null, cost: 0, prices: {}, model3d: null };
+const state = { key: null, result: null, query: null, abort: null, cost: 0, prices: {}, model3d: null, shortId: undefined, admin: null, gallery: [], loop: 4 };
 
 const store = {
   get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
@@ -107,7 +107,7 @@ const SCHEMA = {
     name: 'explainer', strict: true,
     schema: {
       type: 'object', additionalProperties: false,
-      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'parts', 'steps', 'fun_fact', 'svg'],
+      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'parts', 'steps', 'loop_seconds', 'fun_fact', 'svg'],
       properties: {
         title: { type: 'string' },
         hook: { type: 'string' },
@@ -116,8 +116,9 @@ const SCHEMA = {
         search_terms: { type: 'string' },
         parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'name', 'role', 'color'],
           properties: { id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' }, color: { type: 'string' } } } },
-        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text', 'parts'],
-          properties: { title: { type: 'string' }, text: { type: 'string' }, parts: { type: 'array', items: { type: 'string' } } } } },
+        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text', 'parts', 'at'],
+          properties: { title: { type: 'string' }, text: { type: 'string' }, parts: { type: 'array', items: { type: 'string' } }, at: { type: 'number' } } } },
+        loop_seconds: { type: 'number' },
         fun_fact: { type: 'string' },
         svg: { type: 'string' },
       },
@@ -130,21 +131,22 @@ function systemPrompt(lang, level) {
 
 Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 3–7 parts; 3–6 steps. "title" is the thing's name in ${lang}. For a process (e.g. how a house is built, how bread rises) the "parts" are its stages or components and the steps follow them in order; set kind to "process", otherwise "object".
 "wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
+Timing: the whole animation is ONE cycle of "loop_seconds" (2–8 s). Every animation you write uses dur equal to loop_seconds, or begin/dur values inside it, so the cycle repeats cleanly. Each step gets "at": the percentage (0–100) of the cycle at which that step is happening, increasing from step to step (first step at 0). The page lights up each step as the drawing reaches it.
 
 The "svg" is the heart of the answer: ONE bold, flat-colour cutaway or side-view illustration in the style of a vintage children's encyclopedia, showing the real mechanism clearly. Rules:
 - Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"> (no width/height). First element: <rect width="800" height="520" fill="#fbf4e4"/>.
 - Draw with simple primitives (rect, circle, ellipse, path, polygon, polyline, line). Thick dark outlines: stroke="#1d2433" stroke-width="3" or "4", stroke-linejoin="round", stroke-linecap="round". Flat fills using the "color" you give each part (choose from a warm, readable palette: #e4572e, #1f8a8a, #e8b43a, #2b4c7e, #9bc4bc, #d98c5f, #8a6fbf, #a3b86c, #c0c7d0, #f2e3c6).
 - EACH part is exactly one group: <g id="PARTID"> containing all its shapes. PARTID matches the parts list. Give each part data-explode="dx dy": the direction (dx, dy between -230 and 230, each part a different direction, outward from the picture's centre) it should move when the picture is pulled apart so parts stop overlapping. Keep the part <g> itself free of transform/opacity attributes; put any static transform on an inner <g>.
-- Make the mechanism MOVE with SMIL animation (<animate>, <animateTransform additive="sum">, <animateMotion>), repeatCount="indefinite", dur 1–4 s, on elements INSIDE the part groups: pistons slide, blades close, gears turn (mesh correctly), valves open, air/water/electricity flows (animated stroke-dashoffset on dashed paths, in <g id="fx"> with your flow arrows). For a process, loop through the stages (~2 s each) by animating opacity so they appear in order and build up. The scene must look alive the moment it loads.
+- Make the mechanism MOVE with SMIL animation (<animate>, <animateTransform additive="sum">, <animateMotion>), repeatCount="indefinite", dur = loop_seconds, on elements INSIDE the part groups: pistons slide, blades close, gears turn (mesh correctly), valves open, air/water/electricity flows (animated stroke-dashoffset on dashed paths, in <g id="fx"> with your flow arrows). For a process, loop through the stages (~2 s each) by animating opacity so they appear in order and build up. The scene must look alive the moment it loads.
 - Keep motion arrows, flow lines and ground/decoration in <g id="fx">; everything else that is drawn belongs to a part.
 - No text inside the SVG (the page adds numbered labels), except tiny numbers if essential. No <script>, <foreignObject>, <image>, <use> of external resources, no external URLs, no CSS classes. Total svg under 9000 characters. Valid XML: close every tag, escape & as &amp;.
 Draw accurately: real proportions, the real arrangement of parts, the real motion. Never refuse a safe everyday topic. If the request is unsafe (weapons, explosives, drugs, harming people) or meaningless, set kind to "refused", explain in "hook" in ${lang}, and return empty parts, steps and svg.`;
 }
 
-async function askAI(q, lang, level, model, signal) {
+async function askAI(q, lang, level, model, signal, feedback) {
   const messages = [
     { role: 'system', content: systemPrompt(lang, level) },
-    { role: 'user', content: `Show me how this works: ${q}` },
+    { role: 'user', content: `Show me how this works: ${q}` + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
   ];
   let text;
   try {
@@ -156,6 +158,45 @@ async function askAI(q, lang, level, model, signal) {
     text = await callAI({ model, messages: [...messages, { role: 'system', content: 'Reply with the JSON object only, no prose, no code fences.' }], maxTokens: 16000, signal });
   }
   return parseJSON(text);
+}
+
+// Mechanical checks on an answer: the SVG parses, every listed part is drawn and visible,
+// something moves, and the parts pull apart. Returns a list of problems (empty = fine).
+function checkResult(r) {
+  const problems = [];
+  if (r.kind === 'refused') return problems;
+  if (!Array.isArray(r.parts) || r.parts.length < 2) problems.push('fewer than 2 parts');
+  if (!Array.isArray(r.steps) || r.steps.length < 2) problems.push('fewer than 2 steps');
+  const svg = parseSVG(r.svg || '');
+  if (!svg) { problems.push('the svg is not valid XML (check unclosed tags and unescaped & characters)'); return problems; }
+  const ids = (r.parts || []).map((p) => p.id);
+  const missing = ids.filter((id) => !svg.getElementById(id));
+  if (missing.length) problems.push(`these parts have no <g id> in the svg: ${missing.join(', ')}`);
+  if (!svg.querySelector('animate, animateTransform, animateMotion, set')) problems.push('nothing moves: no SMIL animation elements');
+  const explodes = ids.map((id) => (svg.getElementById(id)?.getAttribute('data-explode') || '0 0').split(/[\s,]+/).map(Number));
+  const still = explodes.filter(([x, y]) => !(Math.abs(x) + Math.abs(y) > 20)).length;
+  if (still > 1) problems.push(`${still} parts have no data-explode direction (each part needs a different outward dx dy)`);
+  // measure: every part must have real size on the page
+  const probe = document.createElement('div');
+  probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;height:520px;visibility:hidden';
+  const live = document.importNode(svg, true); probe.appendChild(live); document.body.appendChild(probe);
+  try {
+    const empty = ids.filter((id) => { const g = live.getElementById(id); if (!g) return false; try { const b = g.getBBox(); return b.width < 4 || b.height < 4; } catch { return true; } });
+    if (empty.length) problems.push(`these parts draw nothing visible: ${empty.join(', ')}`);
+    const tiny = ids.filter((id) => { const g = live.getElementById(id); if (!g) return false; try { const b = g.getBBox(); return b.width * b.height > 0 && b.width * b.height < 400; } catch { return false; } });
+    if (tiny.length > 2) problems.push(`parts are too small to see: ${tiny.join(', ')}`);
+  } finally { probe.remove(); }
+  return problems;
+}
+
+function parseSVG(svgText) {
+  if (!svgText.trim()) return null;
+  let doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
+  if (doc.documentElement.nodeName !== 'svg' || doc.querySelector('parsererror')) {
+    doc = new DOMParser().parseFromString(svgText.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/gi, '&amp;'), 'image/svg+xml');
+    if (doc.documentElement.nodeName !== 'svg' || doc.querySelector('parsererror')) return null;
+  }
+  return doc.documentElement;
 }
 
 function parseJSON(text) {
@@ -269,9 +310,20 @@ async function ask(q, { force = false } = {}) {
   state.cost = 0;
   startLoading(q);
   try {
-    const result = await askAI(q, lang, level, model, ctrl.signal);
+    let result = await askAI(q, lang, level, model, ctrl.signal);
     if (ctrl.signal.aborted) return;
-    result.lang = lang; result.cost = state.cost; result.model = model;
+    // check the drawing; if it's broken, ask once more with the list of problems
+    let problems = checkResult(result);
+    if (problems.length) {
+      setLoading('Checking the drawing…', `Found ${problems.length} problem${problems.length > 1 ? 's' : ''}; asking for a better one`);
+      try {
+        const again = await askAI(q, lang, level, model, ctrl.signal, problems);
+        if (ctrl.signal.aborted) return;
+        const p2 = checkResult(again);
+        if (p2.length <= problems.length) { result = again; problems = p2; }
+      } catch (e) { if (e.name === 'AbortError') throw e; /* keep the first drawing */ }
+    }
+    result.lang = lang; result.cost = state.cost; result.model = model; result.problems = problems;
     if (result.kind !== 'refused' && result.svg) cachePut(cacheKey(q, lang, level), result);
     show(result, q);
   } catch (e) {
@@ -298,6 +350,9 @@ function show(result, q, { free = false, shared = false } = {}) {
   $('#r-hook').textContent = result.hook || '';
   $('#fact').textContent = result.fun_fact || '';
   $('#shared-note').hidden = !shared;
+  $('#hero-live').hidden = true;
+  $('#gallery-add').textContent = 'Add to gallery';
+  renderAdmin();
   $('#cost').textContent = shared ? '' : free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
 
   partsById = {};
@@ -305,14 +360,18 @@ function show(result, q, { free = false, shared = false } = {}) {
 
   // steps and parts lists
   const steps = $('#steps'); steps.innerHTML = '';
+  const n = (result.steps || []).length;
   (result.steps || []).forEach((s, i) => {
     const li = document.createElement('li');
     li.innerHTML = `<span class="num">${i + 1}</span><strong></strong><span></span>`;
     li.querySelector('strong').textContent = s.title;
     li.querySelector('span:not(.num)').textContent = s.text;
-    li.addEventListener('click', () => { highlight(s.parts || [], li); });
+    const at = typeof s.at === 'number' && isFinite(s.at) ? Math.min(100, Math.max(0, s.at)) : (i / n) * 100;
+    li.dataset.at = at;
+    li.addEventListener('click', () => { seekTo(at); highlight(s.parts || [], li); setTimeout(clearHighlight, 2500); });
     steps.appendChild(li);
   });
+  state.loop = typeof result.loop_seconds === 'number' && result.loop_seconds > 0.5 ? Math.min(result.loop_seconds, 20) : 4;
   const parts = $('#parts'); parts.innerHTML = '';
   (result.parts || []).forEach((p, i) => {
     const li = document.createElement('li');
@@ -326,6 +385,7 @@ function show(result, q, { free = false, shared = false } = {}) {
 
   drawSVG(result.svg || '');
   setView('works');
+  startTicker();
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   // the other tabs load in the background, free of charge
@@ -352,14 +412,8 @@ function drawSVG(svgText) {
   const stage = $('#stage'); stage.innerHTML = '';
   $('#callout').hidden = true;
   if (!svgText.trim()) { stage.innerHTML = '<p class="empty">No drawing for this one.</p>'; return; }
-  const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
-  let svg = doc.documentElement;
-  if (svg.nodeName !== 'svg' || doc.querySelector('parsererror')) {
-    // try to repair the commonest slip: an unescaped ampersand
-    const doc2 = new DOMParser().parseFromString(svgText.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/gi, '&amp;'), 'image/svg+xml');
-    svg = doc2.documentElement;
-    if (svg.nodeName !== 'svg' || doc2.querySelector('parsererror')) { stage.innerHTML = '<p class="empty">The drawing came back broken. Try “Draw it again”.</p>'; return; }
-  }
+  let svg = parseSVG(svgText);
+  if (!svg) { stage.innerHTML = '<p class="empty">The drawing came back broken. Try “Draw it again”.</p>'; return; }
   // sanitize
   $$('script, foreignObject, image, iframe, object, embed, a', svg).forEach((n) => n.remove());
   $$('*', svg).forEach((el) => {
@@ -381,6 +435,7 @@ function drawSVG(svgText) {
     wrap.setAttribute('data-part', id);
     const [dx, dy] = (g.getAttribute('data-explode') || '0 0').split(/[\s,]+/).map(Number);
     wrap.dataset.dx = isFinite(dx) ? dx : 0; wrap.dataset.dy = isFinite(dy) ? dy : 0;
+    wrap.dataset.auto = (Math.abs(wrap.dataset.dx) + Math.abs(wrap.dataset.dy) > 20) ? '' : '1';
     g.parentNode.insertBefore(wrap, g);
     wrap.appendChild(g);
     wrap.addEventListener('click', (e) => { e.stopPropagation(); highlight([id]); openCallout(id); });
@@ -428,7 +483,35 @@ function drawSVG(svgText) {
     l.setAttribute('transform', `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
     wrap.appendChild(l); // inside the wrapper so it moves with the part
   }
+  fixExplode(svg);
   explode(0);
+}
+
+// Give parts without a direction one (radially from the centre), then push all directions out
+// until the pulled-apart pieces no longer overlap.
+function fixExplode(svg) {
+  const wraps = $$('[data-part]', svg);
+  const boxes = wraps.map((w) => { try { return w.getBBox(); } catch { return { x: 0, y: 0, width: 0, height: 0 }; } });
+  const cx = 400, cy = 260;
+  wraps.forEach((w, i) => {
+    if (w.dataset.auto !== '1') return;
+    const b = boxes[i]; const px = b.x + b.width / 2 - cx, py = b.y + b.height / 2 - cy;
+    const len = Math.hypot(px, py) || 1; const ang = len < 30 ? (i / wraps.length) * Math.PI * 2 : Math.atan2(py, px);
+    w.dataset.dx = Math.round(Math.cos(ang) * 180); w.dataset.dy = Math.round(Math.sin(ang) * 140);
+  });
+  const overlaps = (k) => {
+    let n = 0;
+    for (let i = 0; i < wraps.length; i++) for (let j = i + 1; j < wraps.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      const ax = a.x + wraps[i].dataset.dx * k, ay = a.y + wraps[i].dataset.dy * k, bx = b.x + wraps[j].dataset.dx * k, by = b.y + wraps[j].dataset.dy * k;
+      const ox = Math.min(ax + a.width, bx + b.width) - Math.max(ax, bx), oy = Math.min(ay + a.height, by + b.height) - Math.max(ay, by);
+      if (ox > 0 && oy > 0 && ox * oy > 0.25 * Math.min(a.width * a.height, b.width * b.height)) n++;
+    }
+    return n;
+  };
+  let scale = 1;
+  while (overlaps(scale) > 0 && scale < 2.6) scale += 0.3;
+  if (scale > 1) wraps.forEach((w) => { w.dataset.dx = Math.round(w.dataset.dx * scale); w.dataset.dy = Math.round(w.dataset.dy * scale); });
 }
 
 function highlight(ids, li) {
@@ -467,6 +550,33 @@ function explode(k) {
   svg.setAttribute('viewBox', `${x - padX} ${y - padY} ${w + 2 * padX} ${h + 2 * padY}`);
 }
 
+// Lights up the step the animation is currently at (and its parts), using the SVG's own clock.
+let ticker = null;
+function startTicker() {
+  cancelAnimationFrame(ticker);
+  const tick = () => {
+    ticker = requestAnimationFrame(tick);
+    const svg = $('#stage svg'); if (!svg || $('#view-drawing').hidden || $('#steps').hidden) return;
+    let t; try { t = svg.getCurrentTime(); } catch { return; }
+    const pct = ((t % state.loop) / state.loop) * 100;
+    const lis = $$('#steps li'); if (!lis.length) return;
+    let cur = lis[0];
+    for (const li of lis) if (Number(li.dataset.at) <= pct + 0.01) cur = li;
+    if (cur.classList.contains('now')) return;
+    lis.forEach((li) => li.classList.remove('now'));
+    cur.classList.add('now');
+    const idx = lis.indexOf(cur);
+    const ids = state.result?.steps?.[idx]?.parts || [];
+    $$('[data-part]', svg).forEach((w) => w.classList.toggle('now', ids.includes(w.dataset.part)));
+  };
+  tick();
+}
+function seekTo(pct) {
+  const svg = $('#stage svg'); if (!svg) return;
+  try { svg.setCurrentTime((pct / 100) * state.loop); } catch {}
+  setPlaying(true);
+}
+
 let playing = true;
 function setPlaying(on) {
   playing = on;
@@ -503,31 +613,38 @@ async function loadPhotos(title) {
   const box = $('#gallery'); box.innerHTML = '<p class="empty">Looking for photos…</p>';
   $('#gallery-credit').textContent = '';
   try {
-    let page = title;
-    // resolve to the actual article (redirects, spelling), via the search API
-    const s = await (await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=1&format=json&origin=*`)).json();
-    if (s.query?.search?.[0]) page = s.query.search[0].title;
-    const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/media-list/${encodeURIComponent(page.replace(/ /g, '_'))}`);
-    if (!res.ok) throw new Error();
-    const { items } = await res.json();
-    const pics = (items || []).filter((it) => it.type === 'image' && it.srcset?.length && !BAD_IMAGE.test(it.title)).slice(0, 9);
-    if (!pics.length) throw new Error();
+    let data = null;
+    try { const r = await fetch(`${LINKS_API}/wiki?t=${encodeURIComponent(title)}`); if (r.ok) data = await r.json(); } catch {}
+    if (!data?.pics?.length) data = await wikiDirect(title);
+    if (!data.pics.length) throw new Error();
     box.innerHTML = '';
-    pics.forEach((it, i) => {
-      const src = ('https:' + it.srcset[0].src.replace(/^https?:/, '')).replace(/\/(\d+)px-/, '/720px-');
+    data.pics.forEach((it, i) => {
       const fig = document.createElement('figure'); if (i === 0) fig.className = 'wide';
-      const img = document.createElement('img'); img.loading = 'lazy'; img.src = src; img.alt = it.caption?.text || it.title;
+      const img = document.createElement('img'); img.loading = 'lazy'; img.src = it.src; img.alt = it.caption;
       img.addEventListener('error', () => fig.remove());
-      const cap = document.createElement('figcaption'); cap.textContent = it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ');
+      const cap = document.createElement('figcaption'); cap.textContent = it.caption;
       fig.append(img, cap);
       box.appendChild(fig);
     });
-    const a = `https://en.wikipedia.org/wiki/${encodeURIComponent(page.replace(/ /g, '_'))}`;
-    $('#gallery-credit').innerHTML = `Photos from the Wikipedia article <a href="${a}" target="_blank" rel="noopener"></a>, each under its own licence.`;
-    $('#gallery-credit a').textContent = page;
+    $('#gallery-credit').innerHTML = `Photos from the Wikipedia article <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener"></a>, each under its own licence.`;
+    $('#gallery-credit a').textContent = data.page;
   } catch {
     box.innerHTML = `<p class="empty">No photos found. <a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(title)}" target="_blank" rel="noopener">Search Wikipedia</a></p>`;
   }
+}
+
+// Straight from the browser, when the link service can't be reached.
+async function wikiDirect(title) {
+  let page = title;
+  const s = await (await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=1&format=json&origin=*`)).json();
+  if (s.query?.search?.[0]) page = s.query.search[0].title;
+  const enc = encodeURIComponent(page.replace(/ /g, '_'));
+  const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/media-list/${enc}`);
+  if (!res.ok) throw new Error();
+  const { items } = await res.json();
+  const pics = (items || []).filter((it) => it.type === 'image' && it.srcset?.length && !BAD_IMAGE.test(it.title)).slice(0, 9)
+    .map((it) => ({ src: ('https:' + it.srcset[0].src.replace(/^https?:/, '')).replace(/\/(\d+)px-/, '/720px-'), caption: it.caption?.text || it.title.replace(/^File:/, '').replace(/\.[a-z]+$/i, '').replace(/_/g, ' ') }));
+  return { page, url: `https://en.wikipedia.org/wiki/${enc}`, pics };
 }
 
 // ---------- 3D models (Sketchfab) ----------
@@ -537,10 +654,14 @@ async function load3D(terms, known) {
   $('#model3d-credit').textContent = '';
   const searchLink = `https://sketchfab.com/search?q=${encodeURIComponent(terms)}&type=models`;
   try {
-    const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(terms)}&count=8&sort_by=-likeCount&downloadable=false`);
-    if (!res.ok) throw new Error();
-    const { results } = await res.json();
-    let models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true);
+    let models = null;
+    try { const r = await fetch(`${LINKS_API}/3d?q=${encodeURIComponent(terms)}`); if (r.ok) models = (await r.json()).models; } catch {}
+    if (!models?.length) {
+      const res = await fetch(`https://api.sketchfab.com/v3/search?type=models&q=${encodeURIComponent(terms)}&count=8&sort_by=-likeCount&downloadable=false`);
+      if (!res.ok) throw new Error();
+      const { results } = await res.json();
+      models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true);
+    }
     if (known?.uid) models = [known, ...models.filter((m) => m.uid !== known.uid)];
     if (!models.length) throw new Error();
     box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><div class="thumbs"></div>';
@@ -634,6 +755,7 @@ async function shareUrl() {
     } catch { state.shortId = null; }
   }
   const url = state.shortId ? `${base}#${slug}/s=${state.shortId}` : `${base}#${slug}/r=${await encodeResult(payload)}`;
+  renderAdmin();
   $('#share-link-size').textContent = state.shortId ? 'Short link; the answer is kept by the link service' : `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
   return url;
 }
@@ -722,6 +844,81 @@ ${model}
 </main></body></html>`;
 }
 
+// ---------- gallery (curated answers, free to open) and the live drawing on the home page ----------
+function galleryItems() {
+  const demo = typeof DEMO !== 'undefined' ? Object.entries(DEMO).map(([q, d]) => ({ id: null, demo: q, title: d.title, hook: d.hook, lang: 'English', svg: d.svg })) : [];
+  return [...state.gallery, ...demo.filter((d) => !state.gallery.some((g) => g.title === d.title))];
+}
+async function loadGallery() {
+  try { const r = await fetch(`${LINKS_API}/gallery`); if (r.ok) state.gallery = (await r.json()).filter((g) => g && g.id && g.svg); } catch {}
+  renderGallery();
+  renderHeroLive();
+}
+function thumbSVG(svgText) {
+  const svg = parseSVG(svgText); if (!svg) return null;
+  $$('script, foreignObject, image, iframe, object, embed, a', svg).forEach((n) => n.remove());
+  $$('*', svg).forEach((el) => { for (const a of [...el.attributes]) if (a.name.toLowerCase().startsWith('on')) el.removeAttribute(a.name); });
+  svg.removeAttribute('width'); svg.removeAttribute('height');
+  if (!svg.getAttribute('viewBox')) svg.setAttribute('viewBox', '0 0 800 520');
+  return document.importNode(svg, true);
+}
+function renderGallery() {
+  const items = galleryItems();
+  const box = $('#gallery-home'); const grid = $('#gallery-grid'); grid.innerHTML = '';
+  box.hidden = items.length === 0;
+  items.slice(0, 24).forEach((g) => {
+    const card = document.createElement('button'); card.type = 'button'; card.className = 'gcard';
+    card.innerHTML = '<div class="gthumb"></div><strong></strong><span></span>';
+    const svg = thumbSVG(g.svg); if (svg) $('.gthumb', card).appendChild(svg);
+    $('strong', card).textContent = g.title; $('span', card).textContent = g.hook || '';
+    if (RTL.test(g.lang || '')) card.setAttribute('dir', 'rtl');
+    card.addEventListener('click', () => openGalleryItem(g));
+    grid.appendChild(card);
+  });
+}
+async function openGalleryItem(g) {
+  if (g.demo) { $('#lang').value = 'English'; ask(g.demo); return; }
+  try {
+    startLoading(g.title);
+    const r = await (await fetch(`${LINKS_API}/${g.id}`)).json();
+    const q = r.q || r.title; delete r.q;
+    location.hash = `${encodeURIComponent(g.title.replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${g.id}`;
+    show(r, q, { free: true }); state.shortId = g.id; renderAdmin();
+  } catch { showError('Could not open that answer right now.'); }
+}
+// A moving drawing right under the headline, so the first second shows what the page does.
+function renderHeroLive() {
+  if (document.body.classList.contains('has-result')) return;
+  const items = galleryItems(); const box = $('#hero-live'); if (!items.length) { box.hidden = true; return; }
+  const g = items[Math.floor(Math.random() * Math.min(items.length, 8))];
+  const svg = thumbSVG(g.svg); if (!svg) { box.hidden = true; return; }
+  $('#hero-live-stage').innerHTML = ''; $('#hero-live-stage').appendChild(svg);
+  $('#hero-live-title').textContent = g.title;
+  box.hidden = false;
+  box.onclick = () => openGalleryItem(g);
+}
+// Owner mode: open the page once with #admin=<secret> and "Add to gallery" appears on every answer.
+async function galleryAdd() {
+  if (!state.result || !state.admin) return;
+  await shareUrl();
+  if (!state.shortId) { $('#gallery-add').textContent = 'Could not store the answer (link service unreachable)'; return; }
+  const r = state.result;
+  const res = await fetch(`${LINKS_API}/gallery`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin': state.admin }, body: JSON.stringify({ id: state.shortId, title: r.title, hook: r.hook, lang: r.lang, q: state.query, svg: sharePayload(r).svg }) });
+  const j = await res.json().catch(() => ({}));
+  $('#gallery-add').textContent = res.ok ? `In the gallery (${j.count})` : `Not added: ${j.error || res.status}`;
+  if (res.ok) loadGallery();
+}
+async function galleryRemove() {
+  if (!state.shortId || !state.admin) return;
+  const res = await fetch(`${LINKS_API}/gallery/${state.shortId}`, { method: 'DELETE', headers: { 'X-Admin': state.admin } });
+  $('#gallery-add').textContent = res.ok ? 'Removed from the gallery' : 'Could not remove';
+  if (res.ok) loadGallery();
+}
+function renderAdmin() {
+  $('#gallery-add').hidden = !state.admin || !state.result || state.result.kind === 'refused';
+  $('#gallery-remove').hidden = !state.admin || !state.shortId || !state.gallery.some((g) => g.id === state.shortId);
+}
+
 // ---------- wiring ----------
 $('#ask').addEventListener('submit', (e) => { e.preventDefault(); ask($('#q').value); });
 $$('.chip', $('#chips')).forEach((c) => c.addEventListener('click', () => { if (c.classList.contains('chip-demo')) $('#lang').value = 'English'; ask(c.dataset.q); }));
@@ -736,6 +933,8 @@ $('#explode').addEventListener('input', (e) => explode(e.target.value / 100));
 $('#callout-close').addEventListener('click', () => { $('#callout').hidden = true; clearHighlight(); });
 $('#redraw').addEventListener('click', () => ask(state.query, { force: true }));
 $('#share').addEventListener('click', openShare);
+$('#gallery-add').addEventListener('click', galleryAdd);
+$('#gallery-remove').addEventListener('click', galleryRemove);
 $('#share-link').addEventListener('click', async () => {
   const url = await shareUrl();
   try { await navigator.clipboard.writeText(url); shareStatus('Link copied. Anyone who opens it sees this answer, no sign-in needed.'); }
@@ -767,6 +966,9 @@ window.addEventListener('hashchange', () => { /* links are handled on load only 
   renderRecent();
   loadPrices();
   const h = new URLSearchParams(location.hash.slice(1).replace(/^[^=]*\//, ''));
+  if (h.get('admin')) { store.set('tmw_admin', h.get('admin')); history.replaceState(null, '', callbackUrl()); }
+  state.admin = store.get('tmw_admin');
+  loadGallery();
   const shared = h.get('r'); const shortId = h.get('s');
   if (shortId && /^[a-z0-9]{5,12}$/.test(shortId)) {
     try {

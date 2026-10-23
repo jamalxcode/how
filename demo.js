@@ -8,6 +8,7 @@ const DEMO = {
     wikipedia_title: 'Scissors',
     search_terms: 'scissors',
     lang: 'English',
+    loop_seconds: 2.6,
     fun_fact: 'Scissor blades are not very sharp. They cut by shearing: two edges passing each other so closely that the paper has nowhere to go.',
     parts: [
       { id: 'p1', name: 'Top blade & handle', role: 'One lever: ring at the back, cutting edge at the front', color: '#1f8a8a' },
@@ -15,10 +16,10 @@ const DEMO = {
       { id: 'p3', name: 'Pivot screw', role: 'The hinge both levers turn around; it keeps the blades pressed together', color: '#e4572e' },
     ],
     steps: [
-      { title: 'Squeeze', text: 'Your thumb and finger push the two rings towards each other.', parts: ['p1', 'p2'] },
-      { title: 'Lever', text: 'Each half pivots on the screw. A small movement at the rings becomes a long, strong sweep at the blades.', parts: ['p3'] },
-      { title: 'Shear', text: 'The two edges slide past each other, pinching the paper from both sides until it splits.', parts: ['p1', 'p2'] },
-      { title: 'Moving cut', text: 'The crossing point travels along the blades, so the cut runs forward as you close them.', parts: ['p1', 'p2', 'p3'] },
+      { title: 'Squeeze', text: 'Your thumb and finger push the two rings towards each other.', parts: ['p1', 'p2'], at: 0 },
+      { title: 'Lever', text: 'Each half pivots on the screw. A small movement at the rings becomes a long, strong sweep at the blades.', parts: ['p3'], at: 18 },
+      { title: 'Shear', text: 'The two edges slide past each other, pinching the paper from both sides until it splits.', parts: ['p1', 'p2'], at: 32 },
+      { title: 'Moving cut', text: 'The crossing point travels along the blades, so the cut runs forward as you close them.', parts: ['p1', 'p2', 'p3'], at: 55 },
     ],
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520">
 <rect width="800" height="520" fill="#fbf4e4"/>

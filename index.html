@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -38,6 +38,11 @@
   <section class="hero" id="hero">
     <h1 class="hero-title">How does <span class="hero-it">it</span> work?</h1>
     <p class="hero-sub">Type a thing. Get the picture — an animated diagram, the parts pulled apart, the real thing in photos and 3D. Almost no reading.</p>
+
+    <button type="button" id="hero-live" class="hero-live" hidden aria-label="Open this answer">
+      <div class="hero-live-stage" id="hero-live-stage"></div>
+      <span class="hero-live-cap"><strong id="hero-live-title"></strong> · tap to open</span>
+    </button>
 
     <form id="ask" class="ask" autocomplete="off">
       <div class="ask-row">
@@ -107,6 +112,11 @@
       <button type="button" class="chip" data-q="refrigerator">🧊 Refrigerator</button>
       <button type="button" class="chip" data-q="bicycle gears">🚲 Bicycle gears</button>
     </div>
+
+    <section id="gallery-home" class="gallery-home" hidden aria-label="Browse answers">
+      <h2 class="gallery-h">Browse <em>answers</em> <small>free, no sign-in</small></h2>
+      <div class="ggrid" id="gallery-grid"></div>
+    </section>
 
     <div id="recent" class="recent" hidden>
       <span class="recent-label">Seen before (free to reopen):</span>
@@ -197,6 +207,8 @@
       <span id="cost"></span>
       <button type="button" class="btn btn-primary btn-sm" id="share">↗ Share</button>
       <button type="button" class="link" id="redraw">Draw it again</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="gallery-add" hidden>Add to gallery</button>
+      <button type="button" class="link" id="gallery-remove" hidden>Remove from gallery</button>
     </footer>
   </section>
 </main>
@@ -242,8 +254,8 @@
   </form>
 </dialog>
 
-<script src="demo.js?v=2"></script>
-<script src="app.js?v=4"></script>
+<script src="demo.js?v=3"></script>
+<script src="app.js?v=5"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {
