@@ -443,8 +443,11 @@ function drawSVG(svgText) {
   stage.appendChild(svg);
   svg.addEventListener('click', () => { clearHighlight(); $('#callout').hidden = true; });
 
-  // labels: one numbered badge per part, placed on the part's biggest shape (or where the
-  // AI said with data-label="x y"), nudged apart so badges never sit on top of each other.
+  // labels: one numbered badge per part on a top layer (so no part can cover them), placed on
+  // the part's biggest shape (or where the AI said with data-label="x y"), nudged apart.
+  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  layer.setAttribute('class', 'tmw-labels');
+  svg.appendChild(layer);
   const placed = [];
   for (const [id, p] of Object.entries(partsById)) {
     const wrap = svg.querySelector(`[data-part="${CSS.escape(id)}"]`);
@@ -480,11 +483,36 @@ function drawSVG(svgText) {
     const l = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     l.setAttribute('data-label', id);
     l.innerHTML = `<circle r="18" fill="${safeColor(p.color)}" stroke="#1d2433" stroke-width="3"/><text y="7" text-anchor="middle" font-family="Nunito,system-ui,sans-serif" font-weight="900" font-size="20" fill="#fff" stroke="#1d2433" stroke-width="3" paint-order="stroke">${p.n}</text>`;
-    l.setAttribute('transform', `translate(${cx.toFixed(1)} ${cy.toFixed(1)})`);
-    wrap.appendChild(l); // inside the wrapper so it moves with the part
+    l.dataset.cx = cx.toFixed(1); l.dataset.cy = cy.toFixed(1);
+    l.setAttribute('transform', `translate(${l.dataset.cx} ${l.dataset.cy})`);
+    l.style.cursor = 'pointer';
+    l.addEventListener('click', (e) => { e.stopPropagation(); highlight([id]); openCallout(id); });
+    layer.appendChild(l);
   }
+  fitView(svg);
   fixExplode(svg);
   explode(0);
+}
+
+// Crop the view to what is actually drawn (the AI often uses only the middle of the canvas).
+function fitView(svg) {
+  const vb = (svg.getAttribute('viewBox') || '0 0 800 520').split(/[\s,]+/).map(Number);
+  const [vx, vy, vw, vh] = vb;
+  // ignore background rectangles that cover most of the canvas
+  const bg = $$('rect', svg).filter((r) => (Number(r.getAttribute('width')) || 0) >= vw * 0.9 && (Number(r.getAttribute('height')) || 0) >= vh * 0.9 && !r.closest('[data-part]'));
+  bg.forEach((r) => { r.dataset.bg = '1'; r.style.display = 'none'; });
+  let b; try { b = svg.getBBox(); } catch { b = null; }
+  bg.forEach((r) => { r.style.display = ''; });
+  if (!b || b.width < 50 || b.height < 50) return;
+  const pad = 36;
+  let x = Math.max(vx, b.x - pad), y = Math.max(vy, b.y - pad);
+  let w = Math.min(vx + vw, b.x + b.width + pad) - x, h = Math.min(vy + vh, b.y + b.height + pad) - y;
+  // keep the frame from getting too narrow or too tall
+  if (w / h > 2.2) { const nh = w / 2.2; y -= (nh - h) / 2; h = nh; }
+  if (w / h < 1.1) { const nw = h * 1.1; x -= (nw - w) / 2; w = nw; }
+  svg.setAttribute('viewBox', `${x.toFixed(0)} ${y.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`);
+  svg.dataset.vb = svg.getAttribute('viewBox');
+  bg.forEach((r) => { r.setAttribute('x', x - 1000); r.setAttribute('y', y - 1000); r.setAttribute('width', w + 2000); r.setAttribute('height', h + 2000); });
 }
 
 // Give parts without a direction one (radially from the centre), then push all directions out
@@ -492,7 +520,8 @@ function drawSVG(svgText) {
 function fixExplode(svg) {
   const wraps = $$('[data-part]', svg);
   const boxes = wraps.map((w) => { try { return w.getBBox(); } catch { return { x: 0, y: 0, width: 0, height: 0 }; } });
-  const cx = 400, cy = 260;
+  const [vx, vy, vw, vh] = (svg.dataset.vb || svg.getAttribute('viewBox')).split(/[\s,]+/).map(Number);
+  const cx = vx + vw / 2, cy = vy + vh / 2;
   wraps.forEach((w, i) => {
     if (w.dataset.auto !== '1') return;
     const b = boxes[i]; const px = b.x + b.width / 2 - cx, py = b.y + b.height / 2 - cy;
@@ -542,11 +571,13 @@ function explode(k) {
   $$('[data-part]', svg).forEach((w) => {
     w.style.transform = k ? `translate(${w.dataset.dx * k}px, ${w.dataset.dy * k}px)` : '';
     maxX = Math.max(maxX, Math.abs(w.dataset.dx * k)); maxY = Math.max(maxY, Math.abs(w.dataset.dy * k));
+    const l = svg.querySelector(`.tmw-labels [data-label="${CSS.escape(w.dataset.part)}"]`);
+    if (l) l.setAttribute('transform', `translate(${+l.dataset.cx + w.dataset.dx * k} ${+l.dataset.cy + w.dataset.dy * k})`);
   });
   // zoom out so pulled-apart pieces stay inside the picture
   if (!svg.dataset.vb) svg.dataset.vb = svg.getAttribute('viewBox');
   const [x, y, w, h] = svg.dataset.vb.split(/[\s,]+/).map(Number);
-  const padX = Math.min(maxX * 0.75, w / 2), padY = Math.min(maxY * 0.75, h / 2);
+  const padX = Math.min(maxX * 0.85, w), padY = Math.min(maxY * 0.85, h);
   svg.setAttribute('viewBox', `${x - padX} ${y - padY} ${w + 2 * padX} ${h + 2 * padY}`);
 }
 
@@ -783,7 +814,8 @@ function downloadBlob(blob, name) {
 function currentSVG() {
   const svg = $('#stage svg'); if (!svg) return '';
   const clone = svg.cloneNode(true);
-  $$('[data-part]', clone).forEach((w) => { w.removeAttribute('style'); w.classList.remove('hot'); });
+  $$('[data-part]', clone).forEach((w) => { w.removeAttribute('style'); w.classList.remove('hot', 'now'); });
+  $$('.tmw-labels [data-label]', clone).forEach((l) => l.setAttribute('transform', `translate(${l.dataset.cx} ${l.dataset.cy})`));
   clone.classList.remove('dim', 'exploded');
   if (svg.dataset.vb) clone.setAttribute('viewBox', svg.dataset.vb);
   clone.removeAttribute('class');

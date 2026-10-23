@@ -167,7 +167,8 @@ body.has-result .hero-sub { display: none; }
 .stage-canvas svg [data-part] { cursor: pointer; transition: opacity .2s; }
 .stage-canvas svg.dim [data-part]:not(.hot) { opacity: .22; }
 .stage-canvas svg.exploded [data-part] { transition: transform .35s cubic-bezier(.2,.7,.2,1), opacity .2s; }
-.stage-canvas svg .tmw-label { pointer-events: none; }
+.stage-canvas svg .tmw-labels [data-label] { transition: transform .35s cubic-bezier(.2,.7,.2,1); }
+.stage-canvas svg.dim .tmw-labels [data-label] { opacity: .35; }
 .callout {
   position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 12px; align-items: flex-start;
   background: var(--ink); color: var(--paper); border-radius: 14px; padding: 12px 40px 12px 14px; box-shadow: var(--shadow);
