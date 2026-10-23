@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tell Me Why · How does it work?</title>
+  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: an animated diagram, the parts pulled apart, real photos and a 3D model, in your language.">
+  <meta name="theme-color" content="#fbf4e4">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <meta property="og:title" content="Tell Me Why · How does it work?">
+  <meta property="og:description" content="Type a thing. See how it works — animated, pulled apart, in your language.">
+  <meta property="og:url" content="https://how.sala.company/">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="./" aria-label="Tell Me Why home">
+    <img src="logo.svg" alt="" width="40" height="40">
+    <span class="brand-name">Tell Me <em>Why</em></span>
+  </a>
+  <div class="top-right">
+    <div id="auth" class="auth">
+      <button id="signin" class="btn btn-ghost btn-sm" type="button">Sign in to OpenRouter</button>
+      <span id="signedin" class="signed" hidden>
+        <span class="dot"></span><span class="signed-label">OpenRouter</span>
+        <button id="signout" class="link" type="button">sign out</button>
+      </span>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="hero" id="hero">
+    <h1 class="hero-title">How does <span class="hero-it">it</span> work?</h1>
+    <p class="hero-sub">Type a thing. Get the picture — an animated diagram, the parts pulled apart, the real thing in photos and 3D. Almost no reading.</p>
+
+    <form id="ask" class="ask" autocomplete="off">
+      <div class="ask-row">
+        <label class="sr-only" for="q">What do you want to understand?</label>
+        <input id="q" name="q" type="search" placeholder="a combustion engine, scissors, a can opener…" maxlength="120" enterkeyhint="go" required>
+        <button class="btn btn-primary" type="submit" id="go">
+          <span class="go-label">Show me</span>
+          <svg class="go-arrow" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M5 12h12M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <div class="ask-opts">
+        <label class="opt">
+          <span>Language</span>
+          <select id="lang">
+            <option value="English">English</option>
+            <option value="Arabic">العربية</option>
+            <option value="French">Français</option>
+            <option value="Spanish">Español</option>
+            <option value="German">Deutsch</option>
+            <option value="Portuguese">Português</option>
+            <option value="Italian">Italiano</option>
+            <option value="Turkish">Türkçe</option>
+            <option value="Russian">Русский</option>
+            <option value="Hindi">हिन्दी</option>
+            <option value="Urdu">اردو</option>
+            <option value="Persian">فارسی</option>
+            <option value="Chinese">中文</option>
+            <option value="Japanese">日本語</option>
+            <option value="Korean">한국어</option>
+            <option value="Indonesian">Bahasa Indonesia</option>
+            <option value="Swahili">Kiswahili</option>
+          </select>
+        </label>
+        <label class="opt">
+          <span>For</span>
+          <select id="level">
+            <option value="curious adult">a curious adult</option>
+            <option value="10-year-old">a 10-year-old</option>
+            <option value="engineering student">an engineering student</option>
+          </select>
+        </label>
+        <details class="more">
+          <summary>More options</summary>
+          <label class="opt">
+            <span>AI model</span>
+            <select id="model">
+              <option value="anthropic/claude-sonnet-5.5">Claude Sonnet 5.5 (recommended)</option>
+              <option value="anthropic/claude-opus-5.5">Claude Opus 5.5 (best drawings, costlier)</option>
+              <option value="anthropic/claude-haiku-5.5">Claude Haiku 5.5 (cheapest, simpler drawings)</option>
+            </select>
+          </label>
+          <p class="hint" id="estimate">About $0.05 per answer, charged to your OpenRouter account.</p>
+          <p class="hint">Rather paste a key? <button type="button" class="link" id="paste-key">Use an OpenRouter API key</button></p>
+        </details>
+      </div>
+    </form>
+
+    <div class="chips" id="chips" aria-label="Try one of these">
+      <button type="button" class="chip chip-demo" data-q="scissors">✂️ Scissors <small>free demo</small></button>
+      <button type="button" class="chip" data-q="internal combustion engine">🚗 Combustion engine</button>
+      <button type="button" class="chip" data-q="electric motor">⚡ Electric motor</button>
+      <button type="button" class="chip" data-q="can opener">🥫 Can opener</button>
+      <button type="button" class="chip" data-q="how a house is built">🏠 Building a house</button>
+      <button type="button" class="chip" data-q="toilet flush">🚽 Toilet flush</button>
+      <button type="button" class="chip" data-q="airplane wing lift">✈️ Why planes fly</button>
+      <button type="button" class="chip" data-q="zipper">🤐 Zipper</button>
+      <button type="button" class="chip" data-q="refrigerator">🧊 Refrigerator</button>
+      <button type="button" class="chip" data-q="bicycle gears">🚲 Bicycle gears</button>
+    </div>
+
+    <div id="recent" class="recent" hidden>
+      <span class="recent-label">Seen before (free to reopen):</span>
+      <div id="recent-list"></div>
+    </div>
+  </section>
+
+  <section id="loading" class="loading" hidden aria-live="polite">
+    <div class="loader">
+      <svg viewBox="0 0 120 120" width="88" height="88" aria-hidden="true">
+        <circle cx="60" cy="60" r="44" fill="none" stroke="var(--line)" stroke-width="10" stroke-dasharray="40 30" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="6s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="60" cy="60" r="22" fill="none" stroke="var(--red)" stroke-width="10" stroke-dasharray="22 14" stroke-linecap="round">
+          <animateTransform attributeName="transform" type="rotate" from="360 60 60" to="0 60 60" dur="3s" repeatCount="indefinite"/>
+        </circle>
+        <circle cx="60" cy="60" r="7" fill="var(--ink)"/>
+      </svg>
+    </div>
+    <p class="loading-title" id="loading-title">Drawing…</p>
+    <p class="loading-msg" id="loading-msg">Taking it apart to see what's inside</p>
+    <button type="button" class="btn btn-ghost btn-sm" id="cancel">Cancel</button>
+  </section>
+
+  <section id="error" class="error" hidden role="alert">
+    <p id="error-msg"></p>
+    <button type="button" class="btn btn-ghost btn-sm" id="error-close">Close</button>
+  </section>
+
+  <section id="result" class="result" hidden>
+    <header class="result-head">
+      <p class="eyebrow" id="r-kind">How it works</p>
+      <h2 id="r-title"></h2>
+      <p class="hook" id="r-hook"></p>
+    </header>
+
+    <nav class="tabs" role="tablist" aria-label="Views">
+      <button role="tab" class="tab active" data-view="works" aria-selected="true">▶ In action</button>
+      <button role="tab" class="tab" data-view="parts" aria-selected="false">⊕ Parts</button>
+      <button role="tab" class="tab" data-view="photos" aria-selected="false">📷 Real thing</button>
+      <button role="tab" class="tab" data-view="model3d" aria-selected="false">🧊 3D</button>
+    </nav>
+
+    <!-- In action & Parts share the same drawing -->
+    <div class="view" id="view-drawing">
+      <div class="stage">
+        <div class="stage-canvas" id="stage"></div>
+        <div class="callout" id="callout" hidden>
+          <span class="callout-num" id="callout-num"></span>
+          <div>
+            <strong id="callout-name"></strong>
+            <span id="callout-role"></span>
+          </div>
+          <button type="button" class="callout-x" id="callout-close" aria-label="Close">×</button>
+        </div>
+      </div>
+
+      <div class="controls" id="controls-works">
+        <button type="button" class="btn btn-ghost btn-sm" id="play">⏸ Pause</button>
+        <span class="controls-hint">Tap any part to name it</span>
+      </div>
+      <div class="controls" id="controls-parts" hidden>
+        <label class="slider">
+          <span>Pull apart</span>
+          <input type="range" id="explode" min="0" max="100" value="60">
+        </label>
+        <span class="controls-hint">Tap a part or a name</span>
+      </div>
+
+      <ol class="steps" id="steps"></ol>
+      <ol class="parts" id="parts" hidden></ol>
+
+      <p class="fact" id="fact"></p>
+    </div>
+
+    <div class="view" id="view-photos" hidden>
+      <div class="gallery" id="gallery"></div>
+      <p class="credit" id="gallery-credit"></p>
+    </div>
+
+    <div class="view" id="view-model3d" hidden>
+      <div class="model3d" id="model3d"></div>
+      <p class="credit" id="model3d-credit"></p>
+    </div>
+
+    <footer class="result-foot">
+      <span id="cost"></span>
+      <button type="button" class="link" id="redraw">Draw it again</button>
+      <button type="button" class="link" id="share">Copy link</button>
+      <button type="button" class="link" id="download">Download drawing</button>
+    </footer>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Tell Me Why is a free, static page: your OpenRouter account pays the AI, nothing is stored on this site. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
+    <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
+</footer>
+
+<dialog id="privacy-dialog" class="dialog">
+  <h3>Privacy</h3>
+  <table>
+    <tr><th>Your question &amp; language</th><td>Sent to the AI (Claude, via OpenRouter) when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
+    <tr><th>The answer</th><td>Shown on the page and kept in your browser so you can reopen it free. Nothing is sent back to this site.</td></tr>
+    <tr><th>OpenRouter sign-in</th><td>Kept in your browser until you sign out.</td></tr>
+    <tr><th>Analytics</th><td>Page views only (GoatCounter, no cookies).</td></tr>
+  </table>
+  <form method="dialog"><button class="btn btn-primary btn-sm">OK</button></form>
+</dialog>
+
+<dialog id="key-dialog" class="dialog">
+  <h3>Use an OpenRouter API key</h3>
+  <p>Create one at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>. It stays in this browser only.</p>
+  <form method="dialog" id="key-form">
+    <input id="key-input" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost btn-sm" id="key-cancel">Cancel</button>
+      <button class="btn btn-primary btn-sm" value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="demo.js?v=1"></script>
+<script src="app.js?v=1"></script>
+<!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
+<script>
+  (function () {
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
+    window.goatcounter = { endpoint: 'https://salacompany.goatcounter.com/count', path: function (p) { return location.host + p; } };
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://gc.zgo.at/count.js';
+    s.setAttribute('data-goatcounter', 'https://salacompany.goatcounter.com/count');
+    document.body.appendChild(s);
+  })();
+</script>
+</body>
+</html>
