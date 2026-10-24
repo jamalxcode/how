@@ -213,10 +213,18 @@ async function askAI(q, lang, level, model, signal, feedback, plan) {
     plan = await makePlan(q, lang, level, signal);
   }
   if (plan.kind === 'refused') return { ...plan, svg: '', parts: [], steps: [] };
+  // a photo of the real thing anchors the silhouette and proportions (fetched once, kept on the plan)
+  if (plan.photo === undefined) {
+    setLoading(null, 'Finding a photo of the real thing');
+    plan.photo = await referencePhoto(plan.wikipedia_title || q, signal);
+  }
   setLoading(null, 'Drawing it');
+  const text = `Draw this. PLAN:\n${JSON.stringify({ ...plan, photo: undefined })}`
+    + (plan.photo ? '\n\nThe attached photo shows the real thing. Match its silhouette and proportions in the plan\'s viewpoint, simplified to flat shapes: someone who knows the object must recognise your drawing at a glance without labels. The photo is for shape only; the cutaway, colours and motion come from the plan.' : '')
+    + (feedback ? `\n\nYour previous drawing had these problems:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '');
   const messages = [
     { role: 'system', content: systemPrompt(lang, level) },
-    { role: 'user', content: `Draw this. PLAN:\n${JSON.stringify(plan)}` + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
+    { role: 'user', content: plan.photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: plan.photo } }] : text },
   ];
   const result = await askJSON({ model, maxTokens: 16000, schema: SCHEMA, signal, messages });
   // the plan is the source of truth for everything but the drawing
@@ -225,6 +233,29 @@ async function askAI(q, lang, level, model, signal, feedback, plan) {
   if (Array.isArray(plan.steps) && plan.steps.length) result.steps = plan.steps.map(({ title, text, parts, at }) => ({ title, text, parts, at }));
   result.plan = plan;
   return result;
+}
+
+// The lead photo of the Wikipedia article, as a small data URL (so it can go to the AI).
+async function referencePhoto(title, signal) {
+  try {
+    let data = null;
+    try { const r = await fetch(`${LINKS_API}/wiki?t=${encodeURIComponent(title)}`, { signal }); if (r.ok) data = await r.json(); } catch (e) { if (e.name === 'AbortError') throw e; }
+    if (!data?.pics?.length) data = await wikiDirect(title);
+    const pic = data.pics.find((p) => !/\.svg/i.test(p.src)) || data.pics[0];
+    if (!pic) return null;
+    const url = (pic.small || pic.src).replace(/\/(\d+)px-/, '/640px-');
+    const blob = await (await fetch(url, { signal, referrerPolicy: 'no-referrer' })).blob();
+    if (!blob.type.startsWith('image/')) return null;
+    // downscale to keep the request small
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.8);
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    return null;
+  }
 }
 
 // A second opinion on the picture itself: rendered to an image and judged by a cheap vision model.
@@ -244,6 +275,7 @@ async function reviewDrawing(result, q, signal) {
         { type: 'text', text: `This is meant to be a cutaway/side-view drawing of: ${q}. Its numbered parts are: ${partList}.
 Would a 10-year-old who knows the real thing recognise it at a glance, without the labels? Score 0–10 (7+ = recognisable and parts in believable places). List up to 4 concrete problems the illustrator must fix, each one sentence naming the part and what is wrong about its shape, size, position or attachment (e.g. "the handles float above the head instead of hinging on it", "the cutting wheel is drawn beside the can rim instead of on it"). "note": one sentence for a human reader.` },
         { type: 'image_url', image_url: { url: png } },
+        ...(result.plan?.photo && typeof result.plan.photo === 'string' ? [{ type: 'text', text: 'For comparison, a photo of the real thing:' }, { type: 'image_url', image_url: { url: result.plan.photo } }] : []),
       ] },
     ] });
     const j = parseJSON(text);
@@ -454,6 +486,7 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     }
     result.review = review ? { score: review.score, note: review.note } : null;
     result.lang = lang; result.cost = state.cost; result.model = model; result.problems = problems;
+    if (result.plan) result.plan = { ...result.plan, photo: result.plan.photo ? true : null }; // the photo itself is not kept
     if (result.kind !== 'refused' && result.svg) cachePut(cacheKey(q, lang, level), result);
     show(result, q);
   } catch (e) {
@@ -1169,7 +1202,7 @@ $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.vi
 $('#play').addEventListener('click', () => setPlaying(!playing));
 $('#explode').addEventListener('input', (e) => explode(e.target.value / 100));
 $('#callout-close').addEventListener('click', () => { $('#callout').hidden = true; clearHighlight(); });
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.plan || null }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.plan ? { ...state.result.plan, photo: undefined } : null }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
 $('#flag').addEventListener('click', flagWrong);

@@ -89,12 +89,12 @@
           <label class="opt">
             <span>AI model</span>
             <select id="model">
-              <option value="anthropic/claude-sonnet-5.5">Claude Sonnet 5.5 (recommended)</option>
-              <option value="anthropic/claude-opus-5.5">Claude Opus 5.5 (best drawings, costlier)</option>
-              <option value="anthropic/claude-haiku-5.5">Claude Haiku 5.5 (cheapest, simpler drawings)</option>
+              <option value="anthropic/claude-opus-5.5">Claude Opus 5.5 (recommended: best shapes)</option>
+              <option value="anthropic/claude-sonnet-5.5">Claude Sonnet 5.5 (cheaper, rougher)</option>
+              <option value="anthropic/claude-haiku-5.5">Claude Haiku 5.5 (cheapest, simplest)</option>
             </select>
           </label>
-          <p class="hint" id="estimate">About $0.05 per answer, charged to your OpenRouter account.</p>
+          <p class="hint" id="estimate">About $0.15 per answer, charged to your OpenRouter account.</p>
           <p class="hint">Rather paste a key? <button type="button" class="link" id="paste-key">Use an OpenRouter API key</button></p>
         </details>
       </div>
@@ -257,7 +257,7 @@
 </dialog>
 
 <script src="demo.js?v=3"></script>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {
