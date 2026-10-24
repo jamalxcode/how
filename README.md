@@ -39,6 +39,8 @@ Question + language + audience
  └─ Sketchfab search API → embedded 3D viewer
 ```
 
+- **Two calls, not one:** a cheap planning call first works out the parts (with shape, place and motion), the viewpoint, and each step's cause and effect; the drawing call then has to follow that plan. *Draw it again* reuses the plan and only redraws.
+- **"Something wrong?"** under every answer stores the flag in the link service; the owner sees the list at `#flags`.
 - **The drawing is checked before it's shown:** the SVG must parse, every listed part must exist and be visible, something must move, and parts need a pull-apart direction. If a check fails the page asks the AI once more with the list of problems and keeps the better drawing. Missing pull-apart directions are filled in radially, and all directions are pushed out until the exploded pieces stop overlapping.
 - **Steps follow the motion:** the AI gives each step a position in the animation cycle (`at`, 0–100 %) and the cycle length (`loop_seconds`); the page reads the SVG's own clock and lights up the current step and its parts. Tapping a step jumps the animation there.
 - **Photos and 3D go through the link service** (`/wiki`, `/3d`), which ranks Wikipedia pictures (lead image first, photos before diagrams, no flags/maps/icons) and caches both for a day; the page falls back to calling Wikipedia and Sketchfab directly.

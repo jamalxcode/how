@@ -126,6 +126,41 @@ const SCHEMA = {
   },
 };
 
+// Step 1 of 2: understand the thing before drawing it. Small, cheap, text-only.
+const PLAN_SCHEMA = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'plan', strict: true,
+    schema: {
+      type: 'object', additionalProperties: false,
+      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'view', 'parts', 'steps', 'loop_seconds'],
+      properties: {
+        title: { type: 'string' }, hook: { type: 'string' },
+        kind: { type: 'string', enum: ['object', 'diagram', 'process', 'refused'] },
+        wikipedia_title: { type: 'string' }, search_terms: { type: 'string' }, fun_fact: { type: 'string' },
+        view: { type: 'string' },
+        parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'name', 'role', 'color', 'shape', 'place', 'motion'],
+          properties: { id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' }, color: { type: 'string' }, shape: { type: 'string' }, place: { type: 'string' }, motion: { type: 'string' } } } },
+        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text', 'parts', 'at', 'cause', 'effect'],
+          properties: { title: { type: 'string' }, text: { type: 'string' }, parts: { type: 'array', items: { type: 'string' } }, at: { type: 'number' }, cause: { type: 'string' }, effect: { type: 'string' } } } },
+        loop_seconds: { type: 'number' },
+      },
+    },
+  },
+};
+
+function planPrompt(lang, level) {
+  return `You are the engineer behind a children's "how it works" picture encyclopedia. Before anything is drawn, you work out exactly what the illustrator must show. Answer as JSON only.
+
+Write every text field the reader sees (title, hook, role, step title/text, fun_fact) in ${lang}, for ${level}. Fields for the illustrator (view, shape, place, motion, cause, effect) are in English. Keep reader text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words.
+
+"kind": "object" for a thing made of parts that fit together (engine, scissors, can opener); "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly); "process" (how a house is built): parts are its stages. "refused" only if unsafe (weapons, explosives, drugs, harming people) or meaningless: then explain in hook and leave parts/steps empty.
+"view": one sentence: the single best viewpoint and cut (e.g. "side view, cylinder cut open lengthwise so the agent and siphon tube are visible inside it").
+"parts": 4–8, chosen by what makes the thing DO its job, including hidden ones that matter (phone: antenna, radio chip, microphone, speaker; fridge: compressor, refrigerant loop; engine: spark plug, valves). A part is a physical thing you could touch; light, air, water, electricity, forces are flows, never parts. For each: "id" p1…p8; "color" from #e4572e, #1f8a8a, #e8b43a, #2b4c7e, #9bc4bc, #d98c5f, #8a6fbf, #a3b86c, #c0c7d0, #f2e3c6 (each part a different one); "shape": what it looks like in this view, in simple geometric terms; "place": where it sits relative to other parts, with containment stated explicitly ("inside p1, filling its lower two thirds"); "motion": how it moves during one cycle, or "static".
+"steps": 3–6 in causal order. "at": percentage 0–100 of the cycle when it happens, increasing, first at 0. "cause": what pushes/pulls/flows (one phrase). "effect": what visibly changes as a result (one phrase). "parts": ids involved.
+"loop_seconds": 2–8. "wikipedia_title": English Wikipedia article title. "search_terms": 2–3 English words for a 3D model.`;
+}
+
 function systemPrompt(lang, level) {
   return `You are the illustrator of a children's "how it works" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
 
@@ -135,7 +170,9 @@ Light, air, water, electricity, forces, heat and arrows are NEVER parts: they ar
 "wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
 Timing: the whole animation is ONE cycle of "loop_seconds" (2–8 s). Every animation you write uses dur equal to loop_seconds, or begin/dur values inside it, so the cycle repeats cleanly. Each step gets "at": the percentage (0–100) of the cycle at which that step is happening, increasing from step to step (first step at 0). The page lights up each step as the drawing reaches it.
 
-The "svg" is the heart of the answer: ONE bold, flat-colour cutaway or side-view illustration in the style of a vintage children's encyclopedia, showing the real mechanism clearly. Rules:
+You will be given a PLAN (parts with shape/place/motion, steps with cause/effect, a view). Copy title, hook, kind, wikipedia_title, search_terms, fun_fact, parts (id, name, role, color), steps (title, text, parts, at) and loop_seconds from the plan unchanged. Your job is the drawing.
+
+The "svg" is the heart of the answer: ONE bold, flat-colour cutaway or side-view illustration in the style of a vintage children's encyclopedia, showing the real mechanism clearly. Follow the plan: use its view; draw every part with the shape and at the place it specifies, containment included (a part "inside p1" is drawn inside p1's outline, never beside it); animate exactly the motion it specifies; make each step's cause visibly produce its effect at that step's "at" moment. Rules:
 - Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"> (no width/height). First element: <rect width="800" height="520" fill="#fbf4e4"/>.
 - Draw with simple primitives (rect, circle, ellipse, path, polygon, polyline, line). Thick dark outlines: stroke="#1d2433" stroke-width="3" or "4", stroke-linejoin="round", stroke-linecap="round". Flat fills using the "color" you give each part (choose from a warm, readable palette: #e4572e, #1f8a8a, #e8b43a, #2b4c7e, #9bc4bc, #d98c5f, #8a6fbf, #a3b86c, #c0c7d0, #f2e3c6).
 - EACH part is exactly one group: <g id="PARTID"> containing all its shapes. PARTID matches the parts list. Give each part data-explode="dx dy": the direction (dx, dy between -230 and 230, each part a different direction, outward from the picture's centre) it should move when the picture is pulled apart so parts stop overlapping. Keep the part <g> itself free of transform/opacity attributes; put any static transform on an inner <g>.
@@ -145,21 +182,48 @@ The "svg" is the heart of the answer: ONE bold, flat-colour cutaway or side-view
 Draw accurately: real proportions, the real arrangement of parts, the real motion. Never refuse a safe everyday topic. If the request is unsafe (weapons, explosives, drugs, harming people) or meaningless, set kind to "refused", explain in "hook" in ${lang}, and return empty parts, steps and svg.`;
 }
 
-async function askAI(q, lang, level, model, signal, feedback) {
-  const messages = [
-    { role: 'system', content: systemPrompt(lang, level) },
-    { role: 'user', content: `Show me how this works: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '') + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
-  ];
+const PLAN_MODEL = 'anthropic/claude-sonnet-5.5';
+
+async function askJSON({ model, messages, schema, maxTokens, signal }) {
   let text;
   try {
-    text = await callAI({ model, messages, maxTokens: 16000, responseFormat: SCHEMA, signal });
+    text = await callAI({ model, messages, maxTokens, responseFormat: schema, signal });
   } catch (e) {
     if (signal.aborted) throw e;
     // Some model/provider combinations reject strict schemas; ask again without one.
     if (!/schema|response_format|parameters/i.test(e.message)) throw e;
-    text = await callAI({ model, messages: [...messages, { role: 'system', content: 'Reply with the JSON object only, no prose, no code fences.' }], maxTokens: 16000, signal });
+    text = await callAI({ model, messages: [...messages, { role: 'system', content: 'Reply with the JSON object only, no prose, no code fences.' }], maxTokens, signal });
   }
   return parseJSON(text);
+}
+
+// Two calls: understand (plan), then draw from the plan. The plan is reused when redrawing.
+async function makePlan(q, lang, level, signal) {
+  const ask = `Show me how this works: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '');
+  return askJSON({ model: PLAN_MODEL, maxTokens: 4000, schema: PLAN_SCHEMA, signal, messages: [
+    { role: 'system', content: planPrompt(lang, level) },
+    { role: 'user', content: ask },
+  ] });
+}
+
+async function askAI(q, lang, level, model, signal, feedback, plan) {
+  if (!plan) {
+    setLoading(null, 'Working out the parts and what moves');
+    plan = await makePlan(q, lang, level, signal);
+  }
+  if (plan.kind === 'refused') return { ...plan, svg: '', parts: [], steps: [] };
+  setLoading(null, 'Drawing it');
+  const messages = [
+    { role: 'system', content: systemPrompt(lang, level) },
+    { role: 'user', content: `Draw this. PLAN:\n${JSON.stringify(plan)}` + (feedback ? `\n\nYour previous drawing had these problems, which the page checks mechanically:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '') },
+  ];
+  const result = await askJSON({ model, maxTokens: 16000, schema: SCHEMA, signal, messages });
+  // the plan is the source of truth for everything but the drawing
+  for (const k of ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'loop_seconds']) if (plan[k] != null && plan[k] !== '') result[k] = plan[k];
+  if (Array.isArray(plan.parts) && plan.parts.length) result.parts = plan.parts.map(({ id, name, role, color }) => ({ id, name, role, color }));
+  if (Array.isArray(plan.steps) && plan.steps.length) result.steps = plan.steps.map(({ title, text, parts, at }) => ({ title, text, parts, at }));
+  result.plan = plan;
+  return result;
 }
 
 // Mechanical checks on an answer: the SVG parses, every listed part is drawn and visible,
@@ -288,7 +352,7 @@ function showError(msg) {
   $('#error').hidden = false;
 }
 
-async function ask(q, { force = false } = {}) {
+async function ask(q, { force = false, reusePlan = null } = {}) {
   q = q.trim();
   if (!q) return;
   const lang = $('#lang').value; const level = $('#level').value; const model = $('#model').value;
@@ -312,14 +376,14 @@ async function ask(q, { force = false } = {}) {
   state.cost = 0;
   startLoading(q);
   try {
-    let result = await askAI(q, lang, level, model, ctrl.signal);
+    let result = await askAI(q, lang, level, model, ctrl.signal, null, reusePlan);
     if (ctrl.signal.aborted) return;
     // check the drawing; if it's broken, ask once more with the list of problems
     let problems = checkResult(result);
     if (problems.length) {
       setLoading('Checking the drawing…', `Found ${problems.length} problem${problems.length > 1 ? 's' : ''}; asking for a better one`);
       try {
-        const again = await askAI(q, lang, level, model, ctrl.signal, problems);
+        const again = await askAI(q, lang, level, model, ctrl.signal, problems, result.plan);
         if (ctrl.signal.aborted) return;
         const p2 = checkResult(again);
         if (p2.length <= problems.length) { result = again; problems = p2; }
@@ -355,6 +419,7 @@ function show(result, q, { free = false, shared = false } = {}) {
   $('#shared-note').hidden = !shared;
   $('#hero-live').hidden = true;
   $('#gallery-add').textContent = 'Add to gallery';
+  $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
   $('#cost').textContent = shared ? '' : free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
 
@@ -445,7 +510,7 @@ function drawSVG(svgText) {
     wrap.dataset.auto = (Math.abs(wrap.dataset.dx) + Math.abs(wrap.dataset.dy) > 20) ? '' : '1';
     g.parentNode.insertBefore(wrap, g);
     wrap.appendChild(g);
-    wrap.addEventListener('click', (e) => { e.stopPropagation(); highlight([id]); openCallout(id); });
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); if (svg.classList.contains('exploded') && wrap.classList.contains('hot')) { clearHighlight(); $('#callout').hidden = true; return; } highlight([id]); openCallout(id); });
   }
   stage.appendChild(svg);
   svg.addEventListener('click', () => { clearHighlight(); $('#callout').hidden = true; });
@@ -780,7 +845,8 @@ async function loadPrices() {
 function updateEstimate() {
   const m = $('#model').value;
   const [i, o] = state.prices[m] || FALLBACK[m] || [0, 0];
-  const cost = 1800 * i + 5000 * o; // prompt + a typical drawing
+  const [pi, po] = state.prices[PLAN_MODEL] || FALLBACK[PLAN_MODEL] || [0, 0];
+  const cost = (900 * pi + 1200 * po) + (2600 * i + 5000 * o); // plan + drawing
   $('#estimate').textContent = cost ? `About $${cost.toFixed(2)} per new drawing, charged to your OpenRouter account. Reopening an answer is free.` : '';
 }
 
@@ -911,6 +977,37 @@ ${model}
 </main></body></html>`;
 }
 
+// "This drawing is wrong": store the answer (so it has an id) and flag it in the link service.
+async function flagWrong() {
+  if (!state.result) return;
+  const reason = prompt('What is wrong with this drawing? (optional)') ?? null;
+  if (reason === null) return;
+  await shareUrl();
+  if (!state.shortId) { $('#flag').textContent = 'Could not send (link service unreachable)'; return; }
+  try {
+    const res = await fetch(`${LINKS_API}/flag`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: state.shortId, reason }) });
+    $('#flag').textContent = res.ok ? 'Thanks, noted' : 'Could not send';
+  } catch { $('#flag').textContent = 'Could not send'; }
+  $('#flag').disabled = true;
+}
+// Owner: the list of flagged answers, opened with #flags once the admin secret is stored.
+async function showFlags() {
+  if (!state.admin) { showError('Open the page with #admin=<secret> first.'); return; }
+  try {
+    const list = await (await fetch(`${LINKS_API}/flags`, { headers: { 'X-Admin': state.admin } })).json();
+    const grid = $('#gallery-grid'); grid.innerHTML = '';
+    $('#gallery-home').hidden = false; $('.gallery-h', $('#gallery-home')).innerHTML = 'Flagged <em>drawings</em> <small>owner only</small>';
+    if (!list.length) { grid.innerHTML = '<p class="empty">Nothing flagged yet.</p>'; return; }
+    for (const f of list) {
+      const card = document.createElement('button'); card.type = 'button'; card.className = 'gcard';
+      card.innerHTML = '<strong></strong><span></span>';
+      $('strong', card).textContent = f.title || f.q; $('span', card).textContent = `${f.reason || 'no reason given'} · ${f.at.slice(0, 10)}`;
+      card.addEventListener('click', () => openGalleryItem({ id: f.id, title: f.title || f.q }));
+      grid.appendChild(card);
+    }
+  } catch { showError('Could not load the flags.'); }
+}
+
 // A follow-up question about one part, in the same language and for the same audience,
 // with the thing it belongs to for context.
 function followUp(partName) {
@@ -1007,9 +1104,10 @@ $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.vi
 $('#play').addEventListener('click', () => setPlaying(!playing));
 $('#explode').addEventListener('input', (e) => explode(e.target.value / 100));
 $('#callout-close').addEventListener('click', () => { $('#callout').hidden = true; clearHighlight(); });
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.plan || null }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
+$('#flag').addEventListener('click', flagWrong);
 $('#gallery-remove').addEventListener('click', galleryRemove);
 $('#share-link').addEventListener('click', async () => {
   const url = await shareUrl();
@@ -1044,6 +1142,7 @@ window.addEventListener('hashchange', () => { /* links are handled on load only 
   const h = new URLSearchParams(location.hash.slice(1).replace(/^[^=]*\//, ''));
   if (h.get('admin')) { store.set('tmw_admin', h.get('admin')); history.replaceState(null, '', callbackUrl()); }
   state.admin = store.get('tmw_admin');
+  if (location.hash === '#flags') { await loadGallery(); showFlags(); return; }
   loadGallery();
   const shared = h.get('r'); const shortId = h.get('s');
   if (shortId && /^[a-z0-9]{5,12}$/.test(shortId)) {

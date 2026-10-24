@@ -4,6 +4,8 @@
 //   GET  /gallery       → the curated list [{ id, title, hook, lang, svg }]
 //   POST /gallery       header X-Admin: <ADMIN_SECRET>, body { id, title, hook, lang, svg } → adds it
 //   DELETE /gallery/<id> header X-Admin                      → removes it
+//   POST /flag           body { id, reason }                          → marks a stored answer as wrong
+//   GET  /flags          header X-Admin                                → the flagged answers, newest first
 //   GET  /wiki?t=<title> → { page, url, pics: [{ src, caption }] }   (Wikipedia, cached a day)
 //   GET  /3d?q=<terms>   → { models: [{ uid, name, by, url, thumb }] } (Sketchfab, cached a day)
 // Bindings: KV namespace as LINKS. Optional secret ADMIN_SECRET (for the gallery).
@@ -126,6 +128,22 @@ export default {
       const list = JSON.parse((await env.LINKS.get('gallery:list')) || '[]').filter((x) => x.id !== gid);
       await env.LINKS.put('gallery:list', JSON.stringify(list));
       return json({ ok: true, count: list.length }, 200, h);
+    }
+
+    if (req.method === 'POST' && path === '/flag') {
+      let b; try { b = await req.json(); } catch { return json({ error: 'not json' }, 400, h); }
+      if (!/^[a-z0-9]{5,12}$/.test(b?.id || '')) return json({ error: 'bad id' }, 400, h);
+      const stored = await env.LINKS.get(b.id);
+      if (!stored) return json({ error: 'unknown id' }, 404, h);
+      const list = JSON.parse((await env.LINKS.get('flags:list')) || '[]').filter((x) => x.id !== b.id);
+      let title = ''; let q = ''; try { const a = JSON.parse(stored); title = a.title || ''; q = a.q || ''; } catch {}
+      list.unshift({ id: b.id, title: title.slice(0, 80), q: q.slice(0, 120), reason: String(b.reason || '').slice(0, 300), at: new Date().toISOString() });
+      await env.LINKS.put('flags:list', JSON.stringify(list.slice(0, 200)));
+      return json({ ok: true }, 200, h);
+    }
+    if (req.method === 'GET' && path === '/flags') {
+      if (!isAdmin(req, env)) return json({ error: 'not allowed' }, 403, h);
+      return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
     const key = path.slice(1);
