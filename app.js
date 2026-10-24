@@ -227,6 +227,55 @@ async function askAI(q, lang, level, model, signal, feedback, plan) {
   return result;
 }
 
+// A second opinion on the picture itself: rendered to an image and judged by a cheap vision model.
+// Returns { ok, score 0-10, problems[], note } or null if the review could not be done.
+const REVIEW_MODEL = 'anthropic/claude-haiku-5.5';
+const REVIEW_SCHEMA = { type: 'json_schema', json_schema: { name: 'review', strict: true, schema: { type: 'object', additionalProperties: false,
+  required: ['recognizable', 'score', 'problems', 'note'], properties: { recognizable: { type: 'boolean' }, score: { type: 'number' }, problems: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } } } } };
+
+async function reviewDrawing(result, q, signal) {
+  try {
+    const png = await svgToPng(result.svg, 800);
+    if (!png) return null;
+    const partList = (result.parts || []).map((p, i) => `${i + 1}. ${p.name}`).join('; ');
+    const text = await callAI({ model: REVIEW_MODEL, maxTokens: 600, responseFormat: REVIEW_SCHEMA, signal, messages: [
+      { role: 'system', content: 'You judge illustrations for a children\'s "how it works" encyclopedia. Be strict and concrete. Answer as JSON only.' },
+      { role: 'user', content: [
+        { type: 'text', text: `This is meant to be a cutaway/side-view drawing of: ${q}. Its numbered parts are: ${partList}.
+Would a 10-year-old who knows the real thing recognise it at a glance, without the labels? Score 0–10 (7+ = recognisable and parts in believable places). List up to 4 concrete problems the illustrator must fix, each one sentence naming the part and what is wrong about its shape, size, position or attachment (e.g. "the handles float above the head instead of hinging on it", "the cutting wheel is drawn beside the can rim instead of on it"). "note": one sentence for a human reader.` },
+        { type: 'image_url', image_url: { url: png } },
+      ] },
+    ] });
+    const j = parseJSON(text);
+    return { ok: !!j.recognizable && Number(j.score) >= 6, score: Number(j.score) || 0, problems: (j.problems || []).slice(0, 4), note: j.note || '' };
+  } catch (e) {
+    if (e?.name === 'AbortError') throw e;
+    return null;
+  }
+}
+
+// Render an SVG string to a PNG data URL (first frame of its animation).
+function svgToPng(svgText, width) {
+  return new Promise((resolve) => {
+    const svg = parseSVG(svgText); if (!svg) return resolve(null);
+    const vb = (svg.getAttribute('viewBox') || '0 0 800 520').split(/[\s,]+/).map(Number);
+    const h = Math.round(width * (vb[3] / vb[2]));
+    svg.setAttribute('width', width); svg.setAttribute('height', h);
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas'); c.width = width; c.height = h;
+        const ctx = c.getContext('2d'); ctx.fillStyle = '#fbf4e4'; ctx.fillRect(0, 0, width, h); ctx.drawImage(img, 0, 0, width, h);
+        resolve(c.toDataURL('image/png'));
+      } catch { resolve(null); } finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
 // Mechanical checks on an answer: the SVG parses, every listed part is drawn and visible,
 // something moves, and the parts pull apart. Returns a list of problems (empty = fine).
 function checkResult(r) {
@@ -380,16 +429,30 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     let result = await askAI(q, lang, level, model, ctrl.signal, null, reusePlan);
     if (ctrl.signal.aborted) return;
     // check the drawing; if it's broken, ask once more with the list of problems
+    // check 1: mechanical. check 2: a look at the rendered picture. Either can trigger ONE redraw.
     let problems = checkResult(result);
+    let review = null;
+    if (!problems.length && result.kind !== 'refused') {
+      setLoading('Checking the drawing…', 'Looking at it with fresh eyes');
+      review = await reviewDrawing(result, q, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      if (review && !review.ok) problems = review.problems;
+    }
     if (problems.length) {
-      setLoading('Checking the drawing…', `Found ${problems.length} problem${problems.length > 1 ? 's' : ''}; asking for a better one`);
+      setLoading('Checking the drawing…', review && !review.ok ? 'It did not look right; asking for a better one' : `Found ${problems.length} problem${problems.length > 1 ? 's' : ''}; asking for a better one`);
       try {
         const again = await askAI(q, lang, level, model, ctrl.signal, problems, result.plan);
         if (ctrl.signal.aborted) return;
         const p2 = checkResult(again);
-        if (p2.length <= problems.length) { result = again; problems = p2; }
+        if (!p2.length) {
+          const r2 = await reviewDrawing(again, q, ctrl.signal);
+          if (ctrl.signal.aborted) return;
+          // keep whichever drawing the reviewer scored higher
+          if (!review || (r2?.score ?? 0) >= (review.score ?? 0)) { result = again; problems = r2 && !r2.ok ? r2.problems : []; review = r2; }
+        } else if (p2.length <= problems.length && !review) { result = again; problems = p2; }
       } catch (e) { if (e.name === 'AbortError') throw e; /* keep the first drawing */ }
     }
+    result.review = review ? { score: review.score, note: review.note } : null;
     result.lang = lang; result.cost = state.cost; result.model = model; result.problems = problems;
     if (result.kind !== 'refused' && result.svg) cachePut(cacheKey(q, lang, level), result);
     show(result, q);
@@ -423,6 +486,7 @@ function show(result, q, { free = false, shared = false } = {}) {
   $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
   $('#cost').textContent = shared ? '' : free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
+  $('#cost').title = result.review?.note ? `Reviewer: ${result.review.score}/10 — ${result.review.note}` : '';
 
   partsById = {};
   (result.parts || []).forEach((p, i) => { partsById[p.id] = { ...p, n: i + 1 }; });
@@ -847,7 +911,7 @@ function updateEstimate() {
   const m = $('#model').value;
   const [i, o] = state.prices[m] || FALLBACK[m] || [0, 0];
   const [pi, po] = state.prices[PLAN_MODEL] || FALLBACK[PLAN_MODEL] || [0, 0];
-  const cost = (900 * pi + 1200 * po) + (2600 * i + 5000 * o); // plan + drawing
+  const cost = (900 * pi + 1200 * po) + (2600 * i + 5000 * o) + 0.003; // plan + drawing + picture review
   $('#estimate').textContent = cost ? `About $${cost.toFixed(2)} per new drawing, charged to your OpenRouter account. Reopening an answer is free.` : '';
 }
 
