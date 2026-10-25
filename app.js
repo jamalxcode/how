@@ -261,7 +261,12 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
   location.hash = `q=${encodeURIComponent(q)}&lang=${encodeURIComponent(lang)}`;
 
   if (!force) {
-    if (typeof DEMO !== 'undefined' && DEMO[q.toLowerCase()] && lang === 'English') { show(DEMO[q.toLowerCase()], q, { free: true }); return; }
+    const demo = typeof DEMO !== 'undefined' && DEMO[q.toLowerCase()];
+    if (demo && lang === 'English') {
+      const painted = state.gallery.find((g) => g.title.toLowerCase() === demo.title.toLowerCase());
+      if (painted) { openStored(painted.id, painted.title); return; }
+      show(demo, q, { free: true }); return;
+    }
     const cached = cacheGet(cacheKey(q, lang, level));
     if (cached) { show(cached, q, { free: true }); return; }
   }
