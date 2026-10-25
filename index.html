@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>How · How does it work?</title>
-  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: an animated diagram, the parts pulled apart, real photos and a 3D model, in your language.">
+  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: an exploded view with numbered parts, real photos and a 3D model, in your language.">
   <meta name="theme-color" content="#fbf4e4">
   <link rel="icon" href="logo.svg" type="image/svg+xml">
   <meta property="og:title" content="How · How does it work?">
@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=9">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
 
@@ -30,6 +30,11 @@
         <span class="dot"></span><span class="signed-label">OpenRouter</span>
         <button id="signout" class="link" type="button">sign out</button>
       </span>
+      <button id="oa-set" class="btn btn-ghost btn-sm" type="button">OpenAI key</button>
+      <span id="oa-ok" class="signed" hidden>
+        <span class="dot"></span><span class="signed-label">OpenAI</span>
+        <button id="oa-change" class="link" type="button">change</button>
+      </span>
     </div>
   </div>
 </header>
@@ -37,7 +42,7 @@
 <main>
   <section class="hero" id="hero">
     <h1 class="hero-title">How does <span class="hero-it">it</span> work?</h1>
-    <p class="hero-sub">Type a thing. Get the picture — an animated diagram, the parts pulled apart, the real thing in photos and 3D. Almost no reading.</p>
+    <p class="hero-sub">Type a thing. Get the picture — pulled apart and numbered, the real thing in photos and 3D. Almost no reading.</p>
 
     <button type="button" id="hero-live" class="hero-live" hidden aria-label="Open this answer">
       <div class="hero-live-stage" id="hero-live-stage"></div>
@@ -87,15 +92,14 @@
         <details class="more">
           <summary>More options</summary>
           <label class="opt">
-            <span>AI model</span>
-            <select id="model">
-              <option value="anthropic/claude-opus-5.5">Claude Opus 5.5 (recommended: best shapes)</option>
-              <option value="anthropic/claude-sonnet-5.5">Claude Sonnet 5.5 (cheaper, rougher)</option>
-              <option value="anthropic/claude-haiku-5.5">Claude Haiku 5.5 (cheapest, simplest)</option>
+            <span>Picture quality</span>
+            <select id="quality">
+              <option value="high" selected>High (recommended)</option>
+              <option value="medium">Medium (cheaper)</option>
+              <option value="xhigh">Extra high</option>
             </select>
           </label>
-          <p class="hint" id="estimate">About $0.15 per answer, charged to your OpenRouter account.</p>
-          <p class="hint">Rather paste a key? <button type="button" class="link" id="paste-key">Use an OpenRouter API key</button></p>
+          <p class="hint" id="estimate"></p>
         </details>
       </div>
     </form>
@@ -155,42 +159,17 @@
     </header>
 
     <nav class="tabs" role="tablist" aria-label="Views">
-      <button role="tab" class="tab active" data-view="works" aria-selected="true">▶ In action</button>
-      <button role="tab" class="tab" data-view="parts" aria-selected="false">⊕ Parts</button>
+      <button role="tab" class="tab active" data-view="picture" aria-selected="true">⊕ Pulled apart</button>
       <button role="tab" class="tab" data-view="photos" aria-selected="false">📷 Real thing</button>
       <button role="tab" class="tab" data-view="model3d" aria-selected="false">🧊 3D</button>
     </nav>
 
-    <!-- In action & Parts share the same drawing -->
-    <div class="view" id="view-drawing">
-      <div class="stage">
-        <div class="stage-canvas" id="stage"></div>
-        <div class="callout" id="callout" hidden>
-          <span class="callout-num" id="callout-num"></span>
-          <div>
-            <strong id="callout-name"></strong>
-            <span id="callout-role"></span>
-            <button type="button" class="ask-more ask-more-light" id="callout-more">How does this work? →</button>
-          </div>
-          <button type="button" class="callout-x" id="callout-close" aria-label="Close">×</button>
-        </div>
-      </div>
-
-      <div class="controls" id="controls-works">
-        <button type="button" class="btn btn-ghost btn-sm" id="play">⏸ Pause</button>
-        <span class="controls-hint">Tap any part to name it</span>
-      </div>
-      <div class="controls" id="controls-parts" hidden>
-        <label class="slider">
-          <span>Pull apart</span>
-          <input type="range" id="explode" min="0" max="100" value="60">
-        </label>
-        <span class="controls-hint" id="parts-hint">Tap a part or a name</span>
-      </div>
-
+    <div class="view" id="view-picture">
+      <div class="stage"><div class="picture" id="picture"></div></div>
+      <h3 class="list-h">Parts</h3>
+      <ol class="parts" id="parts"></ol>
+      <h3 class="list-h">Step by step</h3>
       <ol class="steps" id="steps"></ol>
-      <ol class="parts" id="parts" hidden></ol>
-
       <p class="fact" id="fact"></p>
     </div>
 
@@ -216,16 +195,16 @@
 </main>
 
 <footer class="foot">
-  <p>How is a free, static page: your OpenRouter account pays the AI, nothing is stored on this site. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
+  <p>How is a free, static page: your OpenRouter and OpenAI accounts pay the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
     <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
 </footer>
 
 <dialog id="privacy-dialog" class="dialog">
   <h3>Privacy</h3>
   <table>
-    <tr><th>Your question &amp; language</th><td>Sent to the AI (Claude, via OpenRouter) when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
-    <tr><th>The answer</th><td>Shown on the page and kept in your browser so you can reopen it free. Nothing is sent back to this site.</td></tr>
-    <tr><th>OpenRouter sign-in</th><td>Kept in your browser until you sign out.</td></tr>
+    <tr><th>Your question &amp; language</th><td>Sent to Claude (via OpenRouter) for the words and to OpenAI for the picture when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
+    <tr><th>The page you get</th><td>Stored by this site's link service (so it can be shared and reopened free). It holds no name or account; only what you asked and the picture.</td></tr>
+    <tr><th>OpenRouter sign-in and OpenAI key</th><td>Kept in your browser until you sign out / forget the key. Never sent to this site.</td></tr>
     <tr><th>Analytics</th><td>Page views only (GoatCounter, no cookies).</td></tr>
   </table>
   <form method="dialog"><button class="btn btn-primary btn-sm">OK</button></form>
@@ -238,26 +217,27 @@
     <button type="button" class="share-opt" id="share-link"><strong>Copy link</strong><span id="share-link-size">The drawing, parts, steps and 3D model, all inside the address</span></button>
     <button type="button" class="share-opt" id="share-native" hidden><strong>Send…</strong><span>WhatsApp, mail, messages</span></button>
     <button type="button" class="share-opt" id="share-report"><strong>Download report</strong><span>One HTML file that works offline</span></button>
-    <button type="button" class="share-opt" id="share-svg"><strong>Download drawing</strong><span>The animated SVG on its own</span></button>
+    <button type="button" class="share-opt" id="share-svg"><strong>Download picture</strong><span>The image on its own</span></button>
   </div>
   <p id="share-status" class="hint"></p>
   <form method="dialog" class="dialog-actions"><button class="btn btn-ghost btn-sm">Close</button></form>
 </dialog>
 
 <dialog id="key-dialog" class="dialog">
-  <h3>Use an OpenRouter API key</h3>
-  <p>Create one at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>. It stays in this browser only.</p>
+  <h3>Your OpenAI key paints the picture</h3>
+  <p>The words come from Claude through OpenRouter; the picture is painted by OpenAI's image model (about 4¢ each). Paste an OpenAI API key once; it stays in this browser only. Create one at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.</p>
   <form method="dialog" id="key-form">
-    <input id="key-input" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
+    <input id="key-input" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
     <div class="dialog-actions">
+      <button type="button" class="link" id="key-forget">Forget key</button>
       <button type="button" class="btn btn-ghost btn-sm" id="key-cancel">Cancel</button>
       <button class="btn btn-primary btn-sm" value="ok">Save</button>
     </div>
   </form>
 </dialog>
 
-<script src="demo.js?v=3"></script>
-<script src="app.js?v=17"></script>
+<script src="demo.js?v=20"></script>
+<script src="app.js?v=20"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

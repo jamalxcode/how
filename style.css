@@ -323,3 +323,9 @@ body.has-result .hero-sub { display: none; }
 .ask-more:hover { text-decoration: underline; }
 .ask-more-light { color: var(--mustard); }
 .result[dir="rtl"] .ask-more { text-align: right; }
+
+/* ---- the painted picture ---- */
+.picture img { display: block; width: 100%; height: auto; }
+.picture .empty { padding: 60px 20px; }
+.list-h { font-family: var(--font-display); font-size: 20px; margin: 22px 0 8px; }
+.hero-live-stage img, .gthumb img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; }

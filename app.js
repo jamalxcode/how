@@ -1,20 +1,25 @@
 // How — type a thing, see how it works.
-// Static page: the AI (Claude, via OpenRouter, paid by the visitor) returns a JSON "explainer"
-// with an animated SVG; this file draws it, pulls it apart, and adds Wikipedia photos and Sketchfab 3D.
+// Static page. Claude (via OpenRouter, the visitor's account) works out the parts and steps and
+// writes the picture prompt; OpenAI's image model (the visitor's key) paints the exploded view.
+// Pictures and answers are stored by the link service (Cloudflare Worker) so links stay short.
 'use strict';
 
 const OPENROUTER = 'https://openrouter.ai';
+const OPENAI = 'https://api.openai.com/v1';
 const APP_TITLE = 'How';
 const SITE_URL = 'https://how.sala.company/';
 const LINKS_API = 'https://how-links.jamal-akuna-matata.workers.dev';
-const CACHE_KEY = 'tmw_cache_v1';
+const CACHE_KEY = 'how_cache_v2';
 const CACHE_MAX = 24;
 const RTL = /^(arabic|urdu|persian|hebrew)$/i;
+const PLAN_MODEL = 'anthropic/claude-sonnet-5.5';
+const IMAGE_MODEL = 'gpt-image-2.5-flare';
+const IMAGE_SIZE = '1536x1024';
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const state = { key: null, result: null, query: null, abort: null, cost: 0, prices: {}, model3d: null, shortId: undefined, admin: null, gallery: [], loop: 4 };
+const state = { key: null, oaKey: null, result: null, query: null, abort: null, cost: 0, model3d: null, shortId: undefined, admin: null, gallery: [] };
 
 const store = {
   get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
@@ -30,7 +35,7 @@ function b64url(bytes) {
 }
 function callbackUrl() { return location.origin + location.pathname; }
 
-async function signIn(newAccount = false) {
+async function signIn() {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   store.set('pkce_verifier', verifier, sessionStorage);
@@ -38,7 +43,6 @@ async function signIn(newAccount = false) {
   auth.searchParams.set('callback_url', callbackUrl());
   auth.searchParams.set('code_challenge', challenge);
   auth.searchParams.set('code_challenge_method', 'S256');
-  if (newAccount) { location.href = auth.toString(); return; }
   const signin = new URL(`${OPENROUTER}/sign-in`);
   signin.searchParams.set('redirect_url', auth.toString());
   location.href = signin.toString();
@@ -53,8 +57,7 @@ async function finishSignIn() {
   store.del('pkce_verifier', sessionStorage);
   try {
     const res = await fetch(`${OPENROUTER}/api/v1/auth/keys`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, code_verifier: verifier, code_challenge_method: 'S256' }),
     });
     if (!res.ok) throw new Error(`OpenRouter sign-in failed (${res.status})`);
@@ -66,9 +69,12 @@ async function finishSignIn() {
 
 function setKey(key) { state.key = key; store.set('or_key', key); renderAuth(); }
 function signOut() { state.key = null; store.del('or_key'); renderAuth(); }
+function setOaKey(key) { state.oaKey = key || null; if (key) store.set('oa_key', key); else store.del('oa_key'); renderAuth(); }
 function renderAuth() {
   $('#signin').hidden = !!state.key;
   $('#signedin').hidden = !state.key;
+  $('#oa-set').hidden = !!state.oaKey;
+  $('#oa-ok').hidden = !state.oaKey;
 }
 
 // ---------- cache of answers (so a question is paid for once per browser) ----------
@@ -77,7 +83,7 @@ function loadCache() { try { return JSON.parse(store.get(CACHE_KEY) || '{}'); } 
 function cacheGet(k) { return loadCache()[k] || null; }
 function cachePut(k, result) {
   const c = loadCache();
-  c[k] = { ...result, at: Date.now() };
+  c[k] = { ...result, image: undefined, at: Date.now() }; // the picture lives in the link service
   const keys = Object.keys(c).sort((a, b) => c[b].at - c[a].at);
   keys.slice(CACHE_MAX).forEach((old) => delete c[old]);
   store.set(CACHE_KEY, JSON.stringify(c));
@@ -94,96 +100,47 @@ function renderRecent() {
     b.type = 'button'; b.className = 'chip';
     b.textContent = c[k].title || q;
     b.title = `${q} · ${lang}`;
-    b.addEventListener('click', () => { $('#q').value = q; $('#lang').value = lang; $('#level').value = level; show(c[k], q); });
+    b.addEventListener('click', () => { $('#q').value = q; $('#lang').value = lang; $('#level').value = level; show(c[k], q, { free: true }); });
     list.appendChild(b);
   }
   box.hidden = keys.length === 0;
 }
 
-// ---------- the AI call ----------
-const SCHEMA = {
+// ---------- step 1: Claude works out the page and writes the picture prompt ----------
+const PLAN_SCHEMA = {
   type: 'json_schema',
   json_schema: {
     name: 'explainer', strict: true,
     schema: {
       type: 'object', additionalProperties: false,
-      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'parts', 'steps', 'loop_seconds', 'fun_fact', 'svg'],
-      properties: {
-        title: { type: 'string' },
-        hook: { type: 'string' },
-        kind: { type: 'string', enum: ['object', 'diagram', 'process', 'refused'] },
-        wikipedia_title: { type: 'string' },
-        search_terms: { type: 'string' },
-        parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'name', 'role', 'color'],
-          properties: { id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' }, color: { type: 'string' } } } },
-        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text', 'parts', 'at'],
-          properties: { title: { type: 'string' }, text: { type: 'string' }, parts: { type: 'array', items: { type: 'string' } }, at: { type: 'number' } } } },
-        loop_seconds: { type: 'number' },
-        fun_fact: { type: 'string' },
-        svg: { type: 'string' },
-      },
-    },
-  },
-};
-
-// Step 1 of 2: understand the thing before drawing it. Small, cheap, text-only.
-const PLAN_SCHEMA = {
-  type: 'json_schema',
-  json_schema: {
-    name: 'plan', strict: true,
-    schema: {
-      type: 'object', additionalProperties: false,
-      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'view', 'parts', 'steps', 'loop_seconds'],
+      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'parts', 'steps', 'image_prompt'],
       properties: {
         title: { type: 'string' }, hook: { type: 'string' },
         kind: { type: 'string', enum: ['object', 'diagram', 'process', 'refused'] },
         wikipedia_title: { type: 'string' }, search_terms: { type: 'string' }, fun_fact: { type: 'string' },
-        view: { type: 'string' },
-        parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'name', 'role', 'color', 'shape', 'size', 'place', 'motion', 'joined_to'],
-          properties: { id: { type: 'string' }, name: { type: 'string' }, role: { type: 'string' }, color: { type: 'string' }, shape: { type: 'string' }, size: { type: 'string' }, place: { type: 'string' }, motion: { type: 'string' }, joined_to: { type: 'string' } } } },
-        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text', 'parts', 'at', 'cause', 'effect'],
-          properties: { title: { type: 'string' }, text: { type: 'string' }, parts: { type: 'array', items: { type: 'string' } }, at: { type: 'number' }, cause: { type: 'string' }, effect: { type: 'string' } } } },
-        loop_seconds: { type: 'number' },
+        parts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'name_en', 'role'],
+          properties: { name: { type: 'string' }, name_en: { type: 'string' }, role: { type: 'string' } } } },
+        steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text'],
+          properties: { title: { type: 'string' }, text: { type: 'string' } } } },
+        image_prompt: { type: 'string' },
       },
     },
   },
 };
 
 function planPrompt(lang, level) {
-  return `You are the engineer behind a children's "how it works" picture encyclopedia. Before anything is drawn, you work out exactly what the illustrator must show. Answer as JSON only.
+  return `You write the pages of a children's "how it works" picture encyclopedia: the reader learns by LOOKING. Each page is ONE big picture (an exploded or cutaway view, painted by an image model from your prompt) with numbered parts and a few short steps. Answer as JSON only.
 
-Write every text field the reader sees (title, hook, role, step title/text, fun_fact) in ${lang}, for ${level}. Fields for the illustrator (view, shape, place, motion, cause, effect) are in English. Keep reader text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words.
+Write title, hook, part names/roles, steps and fun_fact in ${lang}, for ${level}. "name_en" is the part's English name. Keep text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words; 4–8 parts; 3–6 steps. Choose the parts by what makes the thing DO its job, including hidden ones that matter (a phone: antenna and radio chip; a fridge: compressor and refrigerant loop). A part is a physical thing you could touch.
+"kind": "object" for a thing made of parts (engine, scissors, can opener); "diagram" for a principle shown between things (reading glasses, why planes fly); "process" (how a house is built: parts are its stages); "refused" only if unsafe (weapons, explosives, drugs, harming people) or meaningless, then explain in hook and leave the rest empty.
+"wikipedia_title": English Wikipedia article title. "search_terms": 2–3 English words to find a 3D model.
 
-"kind": "object" for a thing made of parts that fit together (engine, scissors, can opener); "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly); "process" (how a house is built): parts are its stages. "refused" only if unsafe (weapons, explosives, drugs, harming people) or meaningless: then explain in hook and leave parts/steps empty.
-"view": one sentence: the single best viewpoint and cut (e.g. "side view, cylinder cut open lengthwise so the agent and siphon tube are visible inside it").
-"parts": 4–8, chosen by what makes the thing DO its job, including hidden ones that matter (phone: antenna, radio chip, microphone, speaker; fridge: compressor, refrigerant loop; engine: spark plug, valves). A part is a physical thing you could touch; light, air, water, electricity, forces are flows, never parts. For each: "id" p1…p8; "color" from #e4572e, #1f8a8a, #e8b43a, #2b4c7e, #9bc4bc, #d98c5f, #8a6fbf, #a3b86c, #c0c7d0, #f2e3c6 (each part a different one); "shape": what it looks like in this view, in simple geometric terms; "size": its real size relative to the biggest part, as a fraction with the comparison named ("about 0.8 of p6's height", "0.1 of p1's width"); the drawing keeps these proportions, so a handheld tool must be drawn as large as the hand-sized thing it works on; "place": where it sits relative to other parts, with containment stated explicitly ("inside p1, filling its lower two thirds"); "motion": how it moves during one cycle, or "static"; "joined_to": the part(s) it is physically attached to and where ("pivot pin at the end of p2"), or "none".
-Also, before listing parts, decide the scene: the thing itself fills most of the picture; anything it acts on (a can, a sheet of paper, a wall) is context and must not dwarf it.
-"steps": 3–6 in causal order. "at": percentage 0–100 of the cycle when it happens, increasing, first at 0. "cause": what pushes/pulls/flows (one phrase). "effect": what visibly changes as a result (one phrase). "parts": ids involved.
-"loop_seconds": 2–8. "wikipedia_title": English Wikipedia article title. "search_terms": 2–3 English words for a 3D model.`;
+"image_prompt" (English, 90–170 words) is the most important field; the picture must match your parts list. Write it in this order:
+1. The thing by name, with its real appearance and proportions in two sentences.
+2. The view: for an "object", "exploded view: the parts separated along one axis in their real order, real relative sizes, small gaps, thin grey leader lines"; for a "diagram", a clear cutaway or scene; for a "process", a left-to-right sequence of stages.
+3. "Every one of these parts is clearly visible and marked with a white circle containing a bold black number: 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the same order as the parts list. Then: "Number badges only. No other text, words or letters anywhere."
+4. Style: "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, three-quarter view, evenly lit, the whole thing centred with margins, nothing cropped."`;
 }
-
-function systemPrompt(lang, level) {
-  return `You are the illustrator of a children's "how it works" picture encyclopedia: the reader learns by LOOKING, not reading. Answer as JSON only.
-
-Write every text field in ${lang}, for ${level}. Keep text tiny: hook ≤ 20 words (one captivating line); part "role" ≤ 12 words; step "text" ≤ 22 words; 4–8 parts; 3–6 steps.
-Choose the parts by what makes the thing DO its job, not by what is easiest to draw: the parts a curious person would ask about first. Include the hidden ones that matter (a phone: antenna and radio chip, microphone, speaker; a fridge: compressor and refrigerant loop; a car engine: spark plug and valves). The function the thing is named for must be visible in the parts and the steps. "title" is the thing's name in ${lang}. "kind": "object" for a thing made of parts that fit together (engine, scissors, can opener): the page lets the reader pull it apart. "diagram" when the explanation is a principle shown between things (reading glasses: page, lens, eye; why planes fly; how sound travels): parts are the things in the scene and nothing is pulled apart. "process" (how a house is built, how bread rises): the parts are its stages or components and the steps follow them in order.
-Light, air, water, electricity, forces, heat and arrows are NEVER parts: they are drawn as flows in <g id="fx">. A part is a physical thing you could touch.
-"wikipedia_title": the English Wikipedia article title for the thing. "search_terms": 2–3 English words to find a 3D model of it. "fun_fact": one surprising sentence.
-Timing: the whole animation is ONE cycle of "loop_seconds" (2–8 s). Every animation you write uses dur equal to loop_seconds, or begin/dur values inside it, so the cycle repeats cleanly. Each step gets "at": the percentage (0–100) of the cycle at which that step is happening, increasing from step to step (first step at 0). The page lights up each step as the drawing reaches it.
-
-You will be given a PLAN (parts with shape/place/motion, steps with cause/effect, a view). Copy title, hook, kind, wikipedia_title, search_terms, fun_fact, parts (id, name, role, color), steps (title, text, parts, at) and loop_seconds from the plan unchanged. Your job is the drawing.
-
-The "svg" is the heart of the answer: ONE bold, flat-colour cutaway or side-view illustration in the style of a vintage children's encyclopedia, showing the real mechanism clearly. Follow the plan: use its view; draw every part with the shape, at the place and at the relative size it specifies, containment included (a part "inside p1" is drawn inside p1's outline, never beside it); parts that are "joined_to" another must visibly touch it at the joint, with a pin or hinge drawn where they pivot, so nothing floats; animate exactly the motion it specifies; make each step's cause visibly produce its effect at that step's "at" moment. Rules:
-- Start with <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520"> (no width/height). First element: <rect width="800" height="520" fill="#fbf4e4"/>.
-- Draw with simple primitives (rect, circle, ellipse, path, polygon, polyline, line). Thick dark outlines: stroke="#1d2433" stroke-width="3" or "4", stroke-linejoin="round", stroke-linecap="round". Flat fills using the "color" you give each part (choose from a warm, readable palette: #e4572e, #1f8a8a, #e8b43a, #2b4c7e, #9bc4bc, #d98c5f, #8a6fbf, #a3b86c, #c0c7d0, #f2e3c6).
-- EACH part is exactly one group: <g id="PARTID"> containing all its shapes. PARTID matches the parts list. Give each part data-explode="dx dy": the direction (dx, dy between -230 and 230, each part a different direction, outward from the picture's centre) it should move when the picture is pulled apart so parts stop overlapping. Keep the part <g> itself free of transform/opacity attributes; put any static transform on an inner <g>.
-- Make the mechanism MOVE with SMIL animation (<animate>, <animateTransform additive="sum">, <animateMotion>), repeatCount="indefinite", dur = loop_seconds, on elements INSIDE the part groups: pistons slide, blades close, gears turn (mesh correctly), valves open, air/water/electricity flows (animated stroke-dashoffset on dashed paths, in <g id="fx"> with your flow arrows). For a process, loop through the stages (~2 s each) by animating opacity so they appear in order and build up. The scene must look alive the moment it loads.
-- Keep motion arrows, flow lines and ground/decoration in <g id="fx">; everything else that is drawn belongs to a part.
-- No text inside the SVG (the page adds numbered labels), except tiny numbers if essential. No <script>, <foreignObject>, <image>, <use> of external resources, no external URLs, no CSS classes. Total svg under 9000 characters. Valid XML: close every tag, escape & as &amp;.
-Draw accurately: real proportions, the real arrangement of parts, the real motion. Never refuse a safe everyday topic. If the request is unsafe (weapons, explosives, drugs, harming people) or meaningless, set kind to "refused", explain in "hook" in ${lang}, and return empty parts, steps and svg.`;
-}
-
-const PLAN_MODEL = 'anthropic/claude-sonnet-5.5';
 
 async function askJSON({ model, messages, schema, maxTokens, signal }) {
   let text;
@@ -191,167 +148,27 @@ async function askJSON({ model, messages, schema, maxTokens, signal }) {
     text = await callAI({ model, messages, maxTokens, responseFormat: schema, signal });
   } catch (e) {
     if (signal.aborted) throw e;
-    // Some model/provider combinations reject strict schemas; ask again without one.
     if (!/schema|response_format|parameters/i.test(e.message)) throw e;
     text = await callAI({ model, messages: [...messages, { role: 'system', content: 'Reply with the JSON object only, no prose, no code fences.' }], maxTokens, signal });
   }
   return parseJSON(text);
 }
 
-// Two calls: understand (plan), then draw from the plan. The plan is reused when redrawing.
 async function makePlan(q, lang, level, signal) {
-  const ask = `Show me how this works: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '');
-  return askJSON({ model: PLAN_MODEL, maxTokens: 4000, schema: PLAN_SCHEMA, signal, messages: [
+  const ask = `Make the page for: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '');
+  const plan = await askJSON({ model: PLAN_MODEL, maxTokens: 3000, schema: PLAN_SCHEMA, signal, messages: [
     { role: 'system', content: planPrompt(lang, level) },
     { role: 'user', content: ask },
   ] });
-}
-
-async function askAI(q, lang, level, model, signal, feedback, plan) {
-  if (!plan) {
-    setLoading(null, 'Working out the parts and what moves');
-    plan = await makePlan(q, lang, level, signal);
-  }
-  if (plan.kind === 'refused') return { ...plan, svg: '', parts: [], steps: [] };
-  // a photo of the real thing anchors the silhouette and proportions (fetched once, kept on the plan)
-  if (plan.photo === undefined) {
-    setLoading(null, 'Finding a photo of the real thing');
-    plan.photo = await referencePhoto(plan.wikipedia_title || q, signal);
-  }
-  setLoading(null, 'Drawing it');
-  const text = `Draw this. PLAN:\n${JSON.stringify({ ...plan, photo: undefined })}`
-    + (plan.photo ? '\n\nThe attached photo shows the real thing. Match its silhouette and proportions in the plan\'s viewpoint, simplified to flat shapes: someone who knows the object must recognise your drawing at a glance without labels. The photo is for shape only; the cutaway, colours and motion come from the plan.' : '')
-    + (feedback ? `\n\nYour previous drawing had these problems:\n- ${feedback.join('\n- ')}\nDraw it again and fix every one of them.` : '');
-  const messages = [
-    { role: 'system', content: systemPrompt(lang, level) },
-    { role: 'user', content: plan.photo ? [{ type: 'text', text }, { type: 'image_url', image_url: { url: plan.photo } }] : text },
-  ];
-  const result = await askJSON({ model, maxTokens: 16000, schema: SCHEMA, signal, messages });
-  // the plan is the source of truth for everything but the drawing
-  for (const k of ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'loop_seconds']) if (plan[k] != null && plan[k] !== '') result[k] = plan[k];
-  if (Array.isArray(plan.parts) && plan.parts.length) result.parts = plan.parts.map(({ id, name, role, color }) => ({ id, name, role, color }));
-  if (Array.isArray(plan.steps) && plan.steps.length) result.steps = plan.steps.map(({ title, text, parts, at }) => ({ title, text, parts, at }));
-  result.plan = plan;
-  return result;
-}
-
-// The lead photo of the Wikipedia article, as a small data URL (so it can go to the AI).
-async function referencePhoto(title, signal) {
-  try {
-    let data = null;
-    try { const r = await fetch(`${LINKS_API}/wiki?t=${encodeURIComponent(title)}`, { signal }); if (r.ok) data = await r.json(); } catch (e) { if (e.name === 'AbortError') throw e; }
-    if (!data?.pics?.length) data = await wikiDirect(title);
-    const pic = data.pics.find((p) => !/\.svg/i.test(p.src)) || data.pics[0];
-    if (!pic) return null;
-    const url = (pic.small || pic.src).replace(/\/(\d+)px-/, '/640px-');
-    const blob = await (await fetch(url, { signal, referrerPolicy: 'no-referrer' })).blob();
-    if (!blob.type.startsWith('image/')) return null;
-    // downscale to keep the request small
-    const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, 640 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
-    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-    return c.toDataURL('image/jpeg', 0.8);
-  } catch (e) {
-    if (e?.name === 'AbortError') throw e;
-    return null;
-  }
-}
-
-// A second opinion on the picture itself: rendered to an image and judged by a cheap vision model.
-// Returns { ok, score 0-10, problems[], note } or null if the review could not be done.
-const REVIEW_MODEL = 'anthropic/claude-haiku-5.5';
-const REVIEW_SCHEMA = { type: 'json_schema', json_schema: { name: 'review', strict: true, schema: { type: 'object', additionalProperties: false,
-  required: ['recognizable', 'score', 'problems', 'note'], properties: { recognizable: { type: 'boolean' }, score: { type: 'number' }, problems: { type: 'array', items: { type: 'string' } }, note: { type: 'string' } } } } };
-
-async function reviewDrawing(result, q, signal) {
-  try {
-    const png = await svgToPng(result.svg, 800);
-    if (!png) return null;
-    const partList = (result.parts || []).map((p, i) => `${i + 1}. ${p.name}`).join('; ');
-    const text = await callAI({ model: REVIEW_MODEL, maxTokens: 600, responseFormat: REVIEW_SCHEMA, signal, messages: [
-      { role: 'system', content: 'You judge illustrations for a children\'s "how it works" encyclopedia. Be strict and concrete. Answer as JSON only.' },
-      { role: 'user', content: [
-        { type: 'text', text: `This is meant to be a cutaway/side-view drawing of: ${q}. Its numbered parts are: ${partList}.
-Would a 10-year-old who knows the real thing recognise it at a glance, without the labels? Score 0–10 (7+ = recognisable and parts in believable places). List up to 4 concrete problems the illustrator must fix, each one sentence naming the part and what is wrong about its shape, size, position or attachment (e.g. "the handles float above the head instead of hinging on it", "the cutting wheel is drawn beside the can rim instead of on it"). "note": one sentence for a human reader.` },
-        { type: 'image_url', image_url: { url: png } },
-        ...(result.plan?.photo && typeof result.plan.photo === 'string' ? [{ type: 'text', text: 'For comparison, a photo of the real thing:' }, { type: 'image_url', image_url: { url: result.plan.photo } }] : []),
-      ] },
-    ] });
-    const j = parseJSON(text);
-    return { ok: !!j.recognizable && Number(j.score) >= 6, score: Number(j.score) || 0, problems: (j.problems || []).slice(0, 4), note: j.note || '' };
-  } catch (e) {
-    if (e?.name === 'AbortError') throw e;
-    return null;
-  }
-}
-
-// Render an SVG string to a PNG data URL (first frame of its animation).
-function svgToPng(svgText, width) {
-  return new Promise((resolve) => {
-    const svg = parseSVG(svgText); if (!svg) return resolve(null);
-    const vb = (svg.getAttribute('viewBox') || '0 0 800 520').split(/[\s,]+/).map(Number);
-    const h = Math.round(width * (vb[3] / vb[2]));
-    svg.setAttribute('width', width); svg.setAttribute('height', h);
-    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const c = document.createElement('canvas'); c.width = width; c.height = h;
-        const ctx = c.getContext('2d'); ctx.fillStyle = '#fbf4e4'; ctx.fillRect(0, 0, width, h); ctx.drawImage(img, 0, 0, width, h);
-        resolve(c.toDataURL('image/png'));
-      } catch { resolve(null); } finally { URL.revokeObjectURL(url); }
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
-    img.src = url;
-  });
-}
-
-// Mechanical checks on an answer: the SVG parses, every listed part is drawn and visible,
-// something moves, and the parts pull apart. Returns a list of problems (empty = fine).
-function checkResult(r) {
-  const problems = [];
-  if (r.kind === 'refused') return problems;
-  if (!Array.isArray(r.parts) || r.parts.length < 2) problems.push('fewer than 2 parts');
-  if (!Array.isArray(r.steps) || r.steps.length < 2) problems.push('fewer than 2 steps');
-  const svg = parseSVG(r.svg || '');
-  if (!svg) { problems.push('the svg is not valid XML (check unclosed tags and unescaped & characters)'); return problems; }
-  const ids = (r.parts || []).map((p) => p.id);
-  const missing = ids.filter((id) => !svg.getElementById(id));
-  if (missing.length) problems.push(`these parts have no <g id> in the svg: ${missing.join(', ')}`);
-  if (!svg.querySelector('animate, animateTransform, animateMotion, set')) problems.push('nothing moves: no SMIL animation elements');
-  const explodes = ids.map((id) => (svg.getElementById(id)?.getAttribute('data-explode') || '0 0').split(/[\s,]+/).map(Number));
-  const still = explodes.filter(([x, y]) => !(Math.abs(x) + Math.abs(y) > 20)).length;
-  if (still > 1) problems.push(`${still} parts have no data-explode direction (each part needs a different outward dx dy)`);
-  // measure: every part must have real size on the page
-  const probe = document.createElement('div');
-  probe.style.cssText = 'position:absolute;left:-9999px;top:0;width:800px;height:520px;visibility:hidden';
-  const live = document.importNode(svg, true); probe.appendChild(live); document.body.appendChild(probe);
-  try {
-    const empty = ids.filter((id) => { const g = live.getElementById(id); if (!g) return false; try { const b = g.getBBox(); return b.width < 4 || b.height < 4; } catch { return true; } });
-    if (empty.length) problems.push(`these parts draw nothing visible: ${empty.join(', ')}`);
-    const tiny = ids.filter((id) => { const g = live.getElementById(id); if (!g) return false; try { const b = g.getBBox(); return b.width * b.height > 0 && b.width * b.height < 400; } catch { return false; } });
-    if (tiny.length > 2) problems.push(`parts are too small to see: ${tiny.join(', ')}`);
-  } finally { probe.remove(); }
-  return problems;
-}
-
-function parseSVG(svgText) {
-  if (!svgText.trim()) return null;
-  let doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
-  if (doc.documentElement.nodeName !== 'svg' || doc.querySelector('parsererror')) {
-    doc = new DOMParser().parseFromString(svgText.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[0-9a-f]+);)/gi, '&amp;'), 'image/svg+xml');
-    if (doc.documentElement.nodeName !== 'svg' || doc.querySelector('parsererror')) return null;
-  }
-  return doc.documentElement;
+  plan.parts = (plan.parts || []).map((p, i) => ({ id: `p${i + 1}`, ...p }));
+  return plan;
 }
 
 function parseJSON(text) {
   try { return JSON.parse(text); } catch {}
   const a = text.indexOf('{'); const b = text.lastIndexOf('}');
   if (a >= 0 && b > a) { try { return JSON.parse(text.slice(a, b + 1)); } catch {} }
-  throw new Error('The AI answered in a form the page could not read. Try again, or another model.');
+  throw new Error('The AI answered in a form the page could not read. Try again.');
 }
 
 class RetryableError extends Error {
@@ -364,55 +181,68 @@ function sleep(ms, signal) {
     signal?.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Cancelled', 'AbortError')); }, { once: true });
   });
 }
-
-async function callAI({ model, messages, maxTokens, responseFormat, signal }) {
+async function withRetry(fn, signal, label) {
   for (let attempt = 1; ; attempt++) {
-    try {
-      return await requestAI({ model, messages, maxTokens, responseFormat, signal });
-    } catch (e) {
+    try { return await fn(); } catch (e) {
       const retryable = e instanceof RetryableError || (e instanceof TypeError && !signal?.aborted);
-      if (!retryable || attempt >= 3) {
-        throw e instanceof TypeError ? new Error('Could not reach OpenRouter. Check your connection and try again.') : e;
-      }
+      if (!retryable || attempt >= 3) throw e instanceof TypeError ? new Error(`Could not reach ${label}. Check your connection and try again.`) : e;
       const wait = e.retryAfterMs ?? 2000 * 2 ** (attempt - 1);
-      setLoading('Still drawing…', `The AI service is busy; trying again in ${Math.ceil(wait / 1000)} s`);
+      setLoading(null, `${label} is busy; trying again in ${Math.ceil(wait / 1000)} s`);
       await sleep(wait, signal);
     }
   }
 }
 
-async function requestAI({ model, messages, maxTokens, responseFormat, signal }) {
-  const res = await fetch(`${OPENROUTER}/api/v1/chat/completions`, {
-    method: 'POST', signal,
-    headers: { Authorization: `Bearer ${state.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': callbackUrl(), 'X-Title': APP_TITLE },
-    body: JSON.stringify({
-      model, messages, max_tokens: maxTokens, usage: { include: true },
-      ...(responseFormat && { response_format: responseFormat, provider: { require_parameters: true } }),
-    }),
-  });
-  if (!res.ok) {
-    let msg = `${res.status}`;
-    try { const j = await res.json(); msg = j.error?.message || msg; } catch {}
-    if (res.status === 401) { signOut(); throw new Error('Your OpenRouter session expired. Please sign in again.'); }
-    if (res.status === 402) throw new Error('Your OpenRouter account is out of credit. Add credit at openrouter.ai/settings/credits.');
-    if (RETRY_STATUS.has(res.status)) {
-      const after = Number(res.headers.get('retry-after'));
-      throw new RetryableError(`AI request failed: ${msg}`, after > 0 ? Math.min(after, 30) * 1000 : undefined);
+async function callAI({ model, messages, maxTokens, responseFormat, signal }) {
+  return withRetry(async () => {
+    const res = await fetch(`${OPENROUTER}/api/v1/chat/completions`, {
+      method: 'POST', signal,
+      headers: { Authorization: `Bearer ${state.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': callbackUrl(), 'X-Title': APP_TITLE },
+      body: JSON.stringify({ model, messages, max_tokens: maxTokens, usage: { include: true }, ...(responseFormat && { response_format: responseFormat, provider: { require_parameters: true } }) }),
+    });
+    if (!res.ok) {
+      let msg = `${res.status}`;
+      try { const j = await res.json(); msg = j.error?.message || msg; } catch {}
+      if (res.status === 401) { signOut(); throw new Error('Your OpenRouter session expired. Please sign in again.'); }
+      if (res.status === 402) throw new Error('Your OpenRouter account is out of credit. Add credit at openrouter.ai/settings/credits.');
+      if (RETRY_STATUS.has(res.status)) { const after = Number(res.headers.get('retry-after')); throw new RetryableError(`AI request failed: ${msg}`, after > 0 ? Math.min(after, 30) * 1000 : undefined); }
+      throw new Error(`AI request failed: ${msg}`);
     }
-    throw new Error(`AI request failed: ${msg}`);
-  }
-  const j = await res.json();
-  if (j.error) throw new RetryableError(j.error.message || 'The AI returned an error');
-  if (j.usage?.cost != null) state.cost += Number(j.usage.cost);
-  return j.choices?.[0]?.message?.content || '';
+    const j = await res.json();
+    if (j.error) throw new RetryableError(j.error.message || 'The AI returned an error');
+    if (j.usage?.cost != null) state.cost += Number(j.usage.cost);
+    return j.choices?.[0]?.message?.content || '';
+  }, signal, 'OpenRouter');
+}
+
+// ---------- step 2: OpenAI paints the picture ----------
+async function paint(prompt, signal) {
+  return withRetry(async () => {
+    const res = await fetch(`${OPENAI}/images/generations`, {
+      method: 'POST', signal,
+      headers: { Authorization: `Bearer ${state.oaKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: IMAGE_MODEL, prompt, size: IMAGE_SIZE, quality: $('#quality').value, output_format: 'jpeg', output_compression: 85, n: 1 }),
+    });
+    if (!res.ok) {
+      let msg = `${res.status}`;
+      try { const j = await res.json(); msg = j.error?.message || msg; } catch {}
+      if (res.status === 401) { setOaKey(null); throw new Error('OpenAI did not accept the key. Paste it again (top right).'); }
+      if (res.status === 403 && /verif/i.test(msg)) throw new Error('OpenAI says this organisation must be verified before it can make images: platform.openai.com → Settings → Organization → Verify.');
+      if (res.status === 429 && /quota|billing|insufficient/i.test(msg)) throw new Error('Your OpenAI account has no credit for images. Add credit at platform.openai.com/settings/organization/billing.');
+      if (RETRY_STATUS.has(res.status)) throw new RetryableError(`Image request failed: ${msg}`);
+      throw new Error(`Image request failed: ${msg}`);
+    }
+    const j = await res.json();
+    const b64 = j.data?.[0]?.b64_json;
+    if (!b64) throw new Error('OpenAI returned no image.');
+    const u = j.usage || {};
+    state.cost += (Number(u.output_tokens) || 0) * 30e-6 + (Number(u.input_tokens) || 0) * 5e-6; // Flare/Sunburst list prices
+    return `data:image/jpeg;base64,${b64}`;
+  }, signal, 'OpenAI');
 }
 
 // ---------- the flow ----------
-const LOADING_LINES = [
-  'Taking it apart to see what\'s inside', 'Sharpening the pencils', 'Checking which part pushes which',
-  'Colouring in the moving bits', 'Making sure the gears mesh', 'Adding the arrows',
-  'Looking for a photo of the real thing', 'Finding a 3D model to spin around',
-];
+const LOADING_LINES = ['Working out which part does what', 'Deciding what to pull apart', 'Mixing the paints', 'Painting the exploded view', 'Numbering the parts', 'Looking for a photo of the real thing', 'Finding a 3D model to spin'];
 let loadingTimer = null;
 function setLoading(title, msg) {
   if (title) $('#loading-title').textContent = title;
@@ -421,23 +251,17 @@ function setLoading(title, msg) {
 function startLoading(q) {
   $('#loading').hidden = false; $('#result').hidden = true; $('#error').hidden = true;
   setLoading(`Drawing ${q}…`, LOADING_LINES[0]);
-  let i = 1;
-  clearInterval(loadingTimer);
-  loadingTimer = setInterval(() => { setLoading(null, LOADING_LINES[i++ % LOADING_LINES.length]); }, 2600);
+  let i = 1; clearInterval(loadingTimer);
+  loadingTimer = setInterval(() => { setLoading(null, LOADING_LINES[i++ % LOADING_LINES.length]); }, 3200);
   $('#loading').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function stopLoading() { clearInterval(loadingTimer); $('#loading').hidden = true; }
-
-function showError(msg) {
-  stopLoading();
-  $('#error-msg').textContent = msg;
-  $('#error').hidden = false;
-}
+function showError(msg) { stopLoading(); $('#error-msg').textContent = msg; $('#error').hidden = false; }
 
 async function ask(q, { force = false, reusePlan = null } = {}) {
   q = q.trim();
   if (!q) return;
-  const lang = $('#lang').value; const level = $('#level').value; const model = $('#model').value;
+  const lang = $('#lang').value; const level = $('#level').value;
   $('#q').value = q;
   location.hash = `q=${encodeURIComponent(q)}&lang=${encodeURIComponent(lang)}`;
 
@@ -446,49 +270,29 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     const cached = cacheGet(cacheKey(q, lang, level));
     if (cached) { show(cached, q, { free: true }); return; }
   }
-  if (!state.key) {
-    store.set('pending_q', q, sessionStorage);
-    showError('To draw a new answer, sign in to OpenRouter first (top right). The scissors demo and anything you have seen before are free.');
-    $('#signin').focus();
-    return;
-  }
+  if (!state.key) { store.set('pending_q', q, sessionStorage); showError('To make a new page, sign in to OpenRouter first (top right). The demo and the gallery are free.'); $('#signin').focus(); return; }
+  if (!state.oaKey) { store.set('pending_q', q, sessionStorage); $('#key-dialog').showModal(); return; }
 
   state.abort?.abort();
   const ctrl = new AbortController(); state.abort = ctrl;
   state.cost = 0;
   startLoading(q);
   try {
-    let result = await askAI(q, lang, level, model, ctrl.signal, null, reusePlan);
+    let plan = reusePlan;
+    if (!plan) { setLoading(null, 'Working out which part does what'); plan = await makePlan(q, lang, level, ctrl.signal); }
     if (ctrl.signal.aborted) return;
-    // check the drawing; if it's broken, ask once more with the list of problems
-    // check 1: mechanical. check 2: a look at the rendered picture. Either can trigger ONE redraw.
-    let problems = checkResult(result);
-    let review = null;
-    if (!problems.length && result.kind !== 'refused') {
-      setLoading('Checking the drawing…', 'Looking at it with fresh eyes');
-      review = await reviewDrawing(result, q, ctrl.signal);
+    const result = { ...plan, image: null, image_id: null, lang, cost: 0 };
+    if (plan.kind !== 'refused') {
+      setLoading(null, 'Painting the picture (20–40 s)');
+      result.image = await paint(plan.image_prompt, ctrl.signal);
       if (ctrl.signal.aborted) return;
-      if (review && !review.ok) problems = review.problems;
+      setLoading(null, 'Saving');
+      const id = await storeResult(result, q, ctrl.signal);
+      if (id) { result.image_id = id; state.shortId = id; } else state.shortId = null;
     }
-    if (problems.length) {
-      setLoading('Checking the drawing…', review && !review.ok ? 'It did not look right; asking for a better one' : `Found ${problems.length} problem${problems.length > 1 ? 's' : ''}; asking for a better one`);
-      try {
-        const again = await askAI(q, lang, level, model, ctrl.signal, problems, result.plan);
-        if (ctrl.signal.aborted) return;
-        const p2 = checkResult(again);
-        if (!p2.length) {
-          const r2 = await reviewDrawing(again, q, ctrl.signal);
-          if (ctrl.signal.aborted) return;
-          // keep whichever drawing the reviewer scored higher
-          if (!review || (r2?.score ?? 0) >= (review.score ?? 0)) { result = again; problems = r2 && !r2.ok ? r2.problems : []; review = r2; }
-        } else if (p2.length <= problems.length && !review) { result = again; problems = p2; }
-      } catch (e) { if (e.name === 'AbortError') throw e; /* keep the first drawing */ }
-    }
-    result.review = review ? { score: review.score, note: review.note } : null;
-    result.lang = lang; result.cost = state.cost; result.model = model; result.problems = problems;
-    if (result.plan) result.plan = { ...result.plan, photo: result.plan.photo ? true : null }; // the photo itself is not kept
-    if (result.kind !== 'refused' && result.svg) cachePut(cacheKey(q, lang, level), result);
-    show(result, q);
+    result.cost = state.cost;
+    if (plan.kind !== 'refused') cachePut(cacheKey(q, lang, level), result);
+    show(result, q, { keepShort: true });
   } catch (e) {
     if (e.name === 'AbortError') { stopLoading(); return; }
     showError(e.message);
@@ -496,9 +300,11 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
 }
 
 // ---------- rendering ----------
-let partsById = {};
-function show(result, q, { free = false, shared = false } = {}) {
-  state.result = result; state.query = q; state.shortId = undefined;
+function imageUrl(r) { return r.image || (r.image_id ? `${LINKS_API}/img/${r.image_id}` : ''); }
+
+function show(result, q, { free = false, shared = false, keepShort = false } = {}) {
+  state.result = result; state.query = q;
+  if (!keepShort) state.shortId = result.image_id || undefined;
   stopLoading();
   $('#error').hidden = true;
   const r = $('#result');
@@ -509,56 +315,47 @@ function show(result, q, { free = false, shared = false } = {}) {
   if (r.getAttribute('dir') === 'rtl') loadArabicFont();
 
   $('#r-kind').textContent = result.kind === 'process' ? 'How it is done' : result.kind === 'refused' ? 'Sorry' : 'How it works';
-  $('#parts-hint').textContent = result.kind === 'diagram' || result.kind === 'process' ? 'Tap a part or a name' : 'Tap a part or a name · drag to pull apart';
   $('#r-title').textContent = result.title || q;
   $('#r-hook').textContent = result.hook || '';
   $('#fact').textContent = result.fun_fact || '';
   $('#shared-note').hidden = !shared;
   $('#hero-live').hidden = true;
+  $('#cost').textContent = shared ? '' : free ? 'Free (already made)' : result.cost ? `This page cost $${result.cost.toFixed(3)}` : '';
   $('#gallery-add').textContent = 'Add to gallery';
   $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
-  $('#cost').textContent = shared ? '' : free ? 'Free (already drawn)' : result.cost ? `This drawing cost $${result.cost.toFixed(3)}` : '';
-  $('#cost').title = result.review?.note ? `Reviewer: ${result.review.score}/10 — ${result.review.note}` : '';
 
-  partsById = {};
-  (result.parts || []).forEach((p, i) => { partsById[p.id] = { ...p, n: i + 1 }; });
+  const picture = $('#picture'); picture.innerHTML = '';
+  const url = imageUrl(result);
+  if (url) {
+    const img = document.createElement('img'); img.src = url; img.alt = `${result.title}: exploded view with numbered parts`; img.decoding = 'async';
+    img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
+    picture.appendChild(img);
+  } else picture.innerHTML = '<p class="empty">No picture for this one.</p>';
 
-  // steps and parts lists
-  const steps = $('#steps'); steps.innerHTML = '';
-  const n = (result.steps || []).length;
-  (result.steps || []).forEach((s, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="num">${i + 1}</span><strong></strong><span></span>`;
-    li.querySelector('strong').textContent = s.title;
-    li.querySelector('span:not(.num)').textContent = s.text;
-    const at = typeof s.at === 'number' && isFinite(s.at) ? Math.min(100, Math.max(0, s.at)) : (i / n) * 100;
-    li.dataset.at = at;
-    li.addEventListener('click', () => { seekTo(at); highlight(s.parts || [], li); setTimeout(clearHighlight, 2500); });
-    steps.appendChild(li);
-  });
-  state.loop = typeof result.loop_seconds === 'number' && result.loop_seconds > 0.5 ? Math.min(result.loop_seconds, 20) : 4;
   const parts = $('#parts'); parts.innerHTML = '';
   (result.parts || []).forEach((p, i) => {
     const li = document.createElement('li');
     li.innerHTML = `<span class="num"></span><strong></strong><span></span>`;
-    const num = li.querySelector('.num'); num.textContent = i + 1; num.style.background = safeColor(p.color);
+    li.querySelector('.num').textContent = i + 1;
     li.querySelector('strong').textContent = p.name;
     li.querySelector('span:not(.num)').textContent = p.role;
     const more = document.createElement('button'); more.type = 'button'; more.className = 'ask-more'; more.textContent = 'How does this work? →';
     more.addEventListener('click', (e) => { e.stopPropagation(); followUp(p.name); });
     li.appendChild(more);
-    li.addEventListener('click', () => { highlight([p.id], li); openCallout(p.id); });
     parts.appendChild(li);
   });
+  const steps = $('#steps'); steps.innerHTML = '';
+  (result.steps || []).forEach((s, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="num">${i + 1}</span><strong></strong><span></span>`;
+    li.querySelector('strong').textContent = s.title;
+    li.querySelector('span:not(.num)').textContent = s.text;
+    steps.appendChild(li);
+  });
 
-  setView('works');            // the drawing must be visible before it is measured
-  drawSVG(result.svg || '');
-  setView('works');
-  startTicker();
+  setView('picture');
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-  // the other tabs load in the background, free of charge
   loadPhotos(result.wikipedia_title || q);
   load3D(result.search_terms || q, result.m3d);
 }
@@ -574,255 +371,18 @@ function loadArabicFont() {
   l.href = 'https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap';
   document.head.appendChild(l);
 }
-function safeColor(c) { return /^#[0-9a-f]{3,8}$/i.test(c || '') ? c : '#1d2433'; }
-
-// Parse the AI's SVG safely, wrap every part in a group of our own (so pulling apart never fights
-// the AI's own transforms/animations), and add numbered labels.
-function drawSVG(svgText) {
-  const stage = $('#stage'); stage.innerHTML = '';
-  $('#callout').hidden = true;
-  if (!svgText.trim()) { stage.innerHTML = '<p class="empty">No drawing for this one.</p>'; return; }
-  let svg = parseSVG(svgText);
-  if (!svg) { stage.innerHTML = '<p class="empty">The drawing came back broken. Try “Draw it again”.</p>'; return; }
-  // sanitize
-  $$('script, foreignObject, image, iframe, object, embed, a', svg).forEach((n) => n.remove());
-  $$('*', svg).forEach((el) => {
-    for (const a of [...el.attributes]) {
-      const name = a.name.toLowerCase();
-      if (name.startsWith('on') || ((name === 'href' || name === 'xlink:href') && !a.value.startsWith('#'))) el.removeAttribute(a.name);
-    }
-  });
-  svg.removeAttribute('width'); svg.removeAttribute('height');
-  if (!svg.getAttribute('viewBox')) svg.setAttribute('viewBox', '0 0 800 520');
-  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-  svg = document.importNode(svg, true);
-
-  // wrap parts
-  for (const id of Object.keys(partsById)) {
-    const g = svg.getElementById(id);
-    if (!g) continue;
-    const wrap = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    wrap.setAttribute('data-part', id);
-    const [dx, dy] = (g.getAttribute('data-explode') || '0 0').split(/[\s,]+/).map(Number);
-    wrap.dataset.dx = isFinite(dx) ? dx : 0; wrap.dataset.dy = isFinite(dy) ? dy : 0;
-    wrap.dataset.auto = (Math.abs(wrap.dataset.dx) + Math.abs(wrap.dataset.dy) > 20) ? '' : '1';
-    g.parentNode.insertBefore(wrap, g);
-    wrap.appendChild(g);
-    wrap.addEventListener('click', (e) => { e.stopPropagation(); if (svg.classList.contains('exploded') && wrap.classList.contains('hot')) { clearHighlight(); $('#callout').hidden = true; return; } highlight([id]); openCallout(id); });
-  }
-  stage.appendChild(svg);
-  svg.addEventListener('click', () => { clearHighlight(); $('#callout').hidden = true; });
-  placeLabels(svg, 0);
-}
-
-// Numbered labels, pull-apart directions and the cropped view all need the drawing to be laid
-// out on screen; if it isn't yet (hidden tab, first paint), try again on the next frames.
-function placeLabels(svg, attempt) {
-  if (!svg.isConnected) return;
-  const rect = svg.getBoundingClientRect();
-  if ((rect.width < 10 || rect.height < 10) && attempt < 30) { requestAnimationFrame(() => placeLabels(svg, attempt + 1)); return; }
-
-  // labels: one numbered badge per part on a top layer (so no part can cover them), placed on
-  // the part's biggest shape (or where the AI said with data-label="x y"), nudged apart.
-  const layer = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  layer.setAttribute('class', 'tmw-labels');
-  svg.appendChild(layer);
-  const placed = [];
-  for (const [id, p] of Object.entries(partsById)) {
-    const wrap = svg.querySelector(`[data-part="${CSS.escape(id)}"]`);
-    if (!wrap) continue;
-    let cx, cy;
-    const hint = (wrap.firstElementChild?.getAttribute('data-label') || '').split(/[\s,]+/).map(Number);
-    if (hint.length === 2 && hint.every(isFinite)) { [cx, cy] = hint; }
-    else {
-      // biggest shape, measured in the picture's own coordinates (shapes may sit inside transformed groups)
-      let best = null, bestArea = -1;
-      const rootM = svg.getScreenCTM();
-      if (!rootM) continue;
-      const inv = rootM.inverse();
-      for (const el of $$('rect, circle, ellipse, path, polygon, polyline, line', wrap)) {
-        let bb, m; try { bb = el.getBBox(); m = inv.multiply(el.getScreenCTM()); } catch { continue; }
-        const pts = [[bb.x, bb.y], [bb.x + bb.width, bb.y], [bb.x, bb.y + bb.height], [bb.x + bb.width, bb.y + bb.height]]
-          .map(([x, y]) => new DOMPoint(x, y).matrixTransform(m));
-        const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
-        const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-        const area = box.w * box.h;
-        if (area > bestArea) { bestArea = area; best = box; }
-      }
-      if (!best) continue;
-      cx = best.x + best.w / 2; cy = best.y + best.h / 2;
-    }
-    for (let tries = 0; tries < 12; tries++) {
-      const hit = placed.find((q) => Math.hypot(q.x - cx, q.y - cy) < 44);
-      if (!hit) break;
-      const ang = Math.atan2(cy - hit.y, cx - hit.x) || (tries * 1.1);
-      cx = hit.x + Math.cos(ang) * 46; cy = hit.y + Math.sin(ang) * 46;
-    }
-    placed.push({ x: cx, y: cy });
-    const l = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    l.setAttribute('data-label', id);
-    l.innerHTML = `<circle r="18" fill="${safeColor(p.color)}" stroke="#1d2433" stroke-width="3"/><text y="7" text-anchor="middle" font-family="Nunito,system-ui,sans-serif" font-weight="900" font-size="20" fill="#fff" stroke="#1d2433" stroke-width="3" paint-order="stroke">${p.n}</text>`;
-    l.dataset.cx = cx.toFixed(1); l.dataset.cy = cy.toFixed(1);
-    l.setAttribute('transform', `translate(${l.dataset.cx} ${l.dataset.cy})`);
-    l.style.cursor = 'pointer';
-    l.addEventListener('click', (e) => { e.stopPropagation(); highlight([id]); openCallout(id); });
-    layer.appendChild(l);
-  }
-  fitView(svg);
-  fixExplode(svg);
-  explode(0);
-}
-
-// Crop the view to what is actually drawn (the AI often uses only the middle of the canvas).
-function fitView(svg) {
-  const vb = (svg.getAttribute('viewBox') || '0 0 800 520').split(/[\s,]+/).map(Number);
-  const [vx, vy, vw, vh] = vb;
-  // ignore background rectangles that cover most of the canvas
-  const bg = $$('rect', svg).filter((r) => (Number(r.getAttribute('width')) || 0) >= vw * 0.9 && (Number(r.getAttribute('height')) || 0) >= vh * 0.9 && !r.closest('[data-part]'));
-  bg.forEach((r) => { r.dataset.bg = '1'; r.style.display = 'none'; });
-  let b; try { b = svg.getBBox(); } catch { b = null; }
-  bg.forEach((r) => { r.style.display = ''; });
-  if (!b || b.width < 50 || b.height < 50) return;
-  const pad = 36;
-  let x = Math.max(vx, b.x - pad), y = Math.max(vy, b.y - pad);
-  let w = Math.min(vx + vw, b.x + b.width + pad) - x, h = Math.min(vy + vh, b.y + b.height + pad) - y;
-  // keep the frame from getting too narrow or too tall
-  if (w / h > 2.2) { const nh = w / 2.2; y -= (nh - h) / 2; h = nh; }
-  if (w / h < 1.1) { const nw = h * 1.1; x -= (nw - w) / 2; w = nw; }
-  svg.setAttribute('viewBox', `${x.toFixed(0)} ${y.toFixed(0)} ${w.toFixed(0)} ${h.toFixed(0)}`);
-  svg.dataset.vb = svg.getAttribute('viewBox');
-  bg.forEach((r) => { r.setAttribute('x', x - 1000); r.setAttribute('y', y - 1000); r.setAttribute('width', w + 2000); r.setAttribute('height', h + 2000); });
-}
-
-// Give parts without a direction one (radially from the centre), then push all directions out
-// until the pulled-apart pieces no longer overlap.
-function fixExplode(svg) {
-  const wraps = $$('[data-part]', svg);
-  const boxes = wraps.map((w) => { try { return w.getBBox(); } catch { return { x: 0, y: 0, width: 0, height: 0 }; } });
-  const [vx, vy, vw, vh] = (svg.dataset.vb || svg.getAttribute('viewBox')).split(/[\s,]+/).map(Number);
-  const cx = vx + vw / 2, cy = vy + vh / 2;
-  wraps.forEach((w, i) => {
-    if (w.dataset.auto !== '1') return;
-    const b = boxes[i]; const px = b.x + b.width / 2 - cx, py = b.y + b.height / 2 - cy;
-    const len = Math.hypot(px, py) || 1; const ang = len < 30 ? (i / wraps.length) * Math.PI * 2 : Math.atan2(py, px);
-    w.dataset.dx = Math.round(Math.cos(ang) * 180); w.dataset.dy = Math.round(Math.sin(ang) * 140);
-  });
-  const overlaps = (k) => {
-    let n = 0;
-    for (let i = 0; i < wraps.length; i++) for (let j = i + 1; j < wraps.length; j++) {
-      const a = boxes[i], b = boxes[j];
-      const ax = a.x + wraps[i].dataset.dx * k, ay = a.y + wraps[i].dataset.dy * k, bx = b.x + wraps[j].dataset.dx * k, by = b.y + wraps[j].dataset.dy * k;
-      const ox = Math.min(ax + a.width, bx + b.width) - Math.max(ax, bx), oy = Math.min(ay + a.height, by + b.height) - Math.max(ay, by);
-      if (ox > 0 && oy > 0 && ox * oy > 0.25 * Math.min(a.width * a.height, b.width * b.height)) n++;
-    }
-    return n;
-  };
-  let scale = 1;
-  while (overlaps(scale) > 0 && scale < 2.6) scale += 0.3;
-  if (scale > 1) wraps.forEach((w) => { w.dataset.dx = Math.round(w.dataset.dx * scale); w.dataset.dy = Math.round(w.dataset.dy * scale); });
-}
-
-function highlight(ids, li) {
-  const svg = $('#stage svg'); if (!svg) return;
-  $$('.hot', document).forEach((n) => n.classList.remove('hot'));
-  const found = ids.map((id) => svg.querySelector(`[data-part="${CSS.escape(id)}"]`)).filter(Boolean);
-  if (!found.length) { svg.classList.remove('dim'); return; }
-  found.forEach((n) => n.classList.add('hot'));
-  svg.classList.add('dim');
-  li?.classList.add('hot');
-  // also mark matching part cards
-  ids.forEach((id) => { const n = partsById[id]?.n; if (n) $(`#parts li:nth-child(${n})`)?.classList.add('hot'); });
-}
-function clearHighlight() {
-  $('#stage svg')?.classList.remove('dim');
-  $$('.hot', document).forEach((n) => n.classList.remove('hot'));
-}
-function openCallout(id) {
-  const p = partsById[id]; if (!p) return;
-  $('#callout-num').textContent = p.n; $('#callout-num').style.background = safeColor(p.color);
-  $('#callout-name').textContent = p.name; $('#callout-role').textContent = p.role;
-  $('#callout-more').onclick = () => followUp(p.name);
-  $('#callout').hidden = false;
-}
-
-function explode(k) {
-  const svg = $('#stage svg'); if (!svg) return;
-  let maxX = 0, maxY = 0;
-  $$('[data-part]', svg).forEach((w) => {
-    w.style.transform = k ? `translate(${w.dataset.dx * k}px, ${w.dataset.dy * k}px)` : '';
-    maxX = Math.max(maxX, Math.abs(w.dataset.dx * k)); maxY = Math.max(maxY, Math.abs(w.dataset.dy * k));
-    const l = svg.querySelector(`.tmw-labels [data-label="${CSS.escape(w.dataset.part)}"]`);
-    if (l) l.setAttribute('transform', `translate(${+l.dataset.cx + w.dataset.dx * k} ${+l.dataset.cy + w.dataset.dy * k})`);
-  });
-  // zoom out so pulled-apart pieces stay inside the picture
-  if (!svg.dataset.vb) svg.dataset.vb = svg.getAttribute('viewBox');
-  const [x, y, w, h] = svg.dataset.vb.split(/[\s,]+/).map(Number);
-  const padX = Math.min(maxX * 0.85, w), padY = Math.min(maxY * 0.85, h);
-  svg.setAttribute('viewBox', `${x - padX} ${y - padY} ${w + 2 * padX} ${h + 2 * padY}`);
-}
-
-// Lights up the step the animation is currently at (and its parts), using the SVG's own clock.
-let ticker = null;
-function startTicker() {
-  cancelAnimationFrame(ticker);
-  const tick = () => {
-    ticker = requestAnimationFrame(tick);
-    const svg = $('#stage svg'); if (!svg || $('#view-drawing').hidden || $('#steps').hidden) return;
-    let t; try { t = svg.getCurrentTime(); } catch { return; }
-    const pct = ((t % state.loop) / state.loop) * 100;
-    const lis = $$('#steps li'); if (!lis.length) return;
-    let cur = lis[0];
-    for (const li of lis) if (Number(li.dataset.at) <= pct + 0.01) cur = li;
-    if (cur.classList.contains('now')) return;
-    lis.forEach((li) => li.classList.remove('now'));
-    cur.classList.add('now');
-    const idx = lis.indexOf(cur);
-    const ids = state.result?.steps?.[idx]?.parts || [];
-    $$('[data-part]', svg).forEach((w) => w.classList.toggle('now', ids.includes(w.dataset.part)));
-  };
-  tick();
-}
-function seekTo(pct) {
-  const svg = $('#stage svg'); if (!svg) return;
-  try { svg.setCurrentTime((pct / 100) * state.loop); } catch {}
-  setPlaying(true);
-}
-
-let playing = true;
-function setPlaying(on) {
-  playing = on;
-  const svg = $('#stage svg'); if (!svg) return;
-  try { on ? svg.unpauseAnimations() : svg.pauseAnimations(); } catch {}
-  $('#play').textContent = on ? '⏸ Pause' : '▶ Play';
-}
-
 function setView(view) {
   $$('.tab').forEach((t) => { const on = t.dataset.view === view; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
-  $('#view-drawing').hidden = !(view === 'works' || view === 'parts');
+  $('#view-picture').hidden = view !== 'picture';
   $('#view-photos').hidden = view !== 'photos';
   $('#view-model3d').hidden = view !== 'model3d';
-  $('#controls-works').hidden = view !== 'works';
-  $('#controls-parts').hidden = view !== 'parts';
-  $('#steps').hidden = view !== 'works';
-  $('#parts').hidden = view !== 'parts';
-  clearHighlight(); $('#callout').hidden = true;
-  const svg = $('#stage svg');
-  if (view !== 'works') $$('.now', document).forEach((n) => n.classList.remove('now'));
-  const diagram = state.result?.kind === 'diagram' || state.result?.kind === 'process';
-  $('#explode').parentElement.hidden = diagram;
-  if (view === 'parts') {
-    svg?.classList.add('exploded');
-    try { svg?.pauseAnimations(); } catch {}
-    explode(diagram ? 0 : $('#explode').value / 100);
-  } else if (view === 'works') {
-    svg?.classList.remove('exploded');
-    explode(0);
-    setPlaying(true);
-  }
 }
 
 // ---------- photos of the real thing (Wikipedia) ----------
 const BAD_IMAGE = /icon|logo|commons-|wiki|edit-|question_book|symbol|flag_of|ambox|disambig|padlock|speaker|sound-|nuvola|crystal_clear|\.ogv|\.webm|\.ogg/i;
+function wikiImageUrl(src) {
+  return ('https:' + String(src).replace(/^https?:/, '')).replace(/^https:\/\/thumb\.wikimedia\.org\//, 'https://upload.wikimedia.org/').split('?')[0];
+}
 async function loadPhotos(title) {
   const box = $('#gallery'); box.innerHTML = '<p class="empty">Looking for photos…</p>';
   $('#gallery-credit').textContent = '';
@@ -832,18 +392,12 @@ async function loadPhotos(title) {
     if (!data?.pics?.length) data = await wikiDirect(title);
     if (!data.pics.length) throw new Error('the article has no usable pictures');
     box.innerHTML = '';
-    let failed = 0;
     data.pics.forEach((it, i) => {
       const fig = document.createElement('figure'); if (i === 0) fig.className = 'wide';
       const img = document.createElement('img'); img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; img.alt = it.caption;
-      const tries = [it.src, it.small].filter((u, k, arr) => u && arr.indexOf(u) === k);
+      const tries = [wikiImageUrl(it.src), it.small && wikiImageUrl(it.small)].filter((u, k, arr) => u && arr.indexOf(u) === k);
       img.src = tries.shift();
-      img.addEventListener('error', () => {
-        if (tries.length) { img.src = tries.shift(); return; }
-        failed++;
-        fig.classList.add('broken');
-        if (failed === data.pics.length) box.insertAdjacentHTML('afterbegin', `<p class="empty">The photos exist but would not load here. <a href="${escapeHTML(data.url)}" target="_blank" rel="noopener">See them on Wikipedia</a><br><small>First one tried: <a href="${escapeHTML(data.pics[0].src)}" target="_blank" rel="noopener">${escapeHTML(data.pics[0].src)}</a></small></p>`);
-      });
+      img.addEventListener('error', () => { if (tries.length) { img.src = tries.shift(); return; } fig.remove(); });
       const cap = document.createElement('figcaption'); cap.textContent = it.caption;
       fig.append(img, cap);
       box.appendChild(fig);
@@ -854,13 +408,6 @@ async function loadPhotos(title) {
     box.innerHTML = `<p class="empty">No photos found${e?.message ? ` (${escapeHTML(e.message)})` : ''}. <a href="https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(title)}" target="_blank" rel="noopener">Search Wikipedia</a></p>`;
   }
 }
-
-// Wikipedia's media list points at thumb.wikimedia.org with tracking parameters meant for its own
-// pages; that host refuses other sites. upload.wikimedia.org serves the same files to anyone.
-function wikiImageUrl(src) {
-  return ('https:' + String(src).replace(/^https?:/, '')).replace(/^https:\/\/thumb\.wikimedia\.org\//, 'https://upload.wikimedia.org/').split('?')[0];
-}
-// Straight from the browser, when the link service can't be reached.
 async function wikiDirect(title) {
   let page = title;
   const s = await (await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(title)}&srlimit=1&format=json&origin=*`)).json();
@@ -896,7 +443,6 @@ async function load3D(terms, known) {
     box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><div class="thumbs"></div>';
     const iframe = $('iframe', box); const thumbs = $('.thumbs', box);
     const pick = (m, btn) => {
-      state.shortId = undefined;
       state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: m.viewerUrl || m.url || '', thumb: thumbOf(m) };
       iframe.src = `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
       $$('button', thumbs).forEach((b) => b.classList.toggle('active', b === btn));
@@ -905,9 +451,8 @@ async function load3D(terms, known) {
     };
     models.forEach((m, i) => {
       const b = document.createElement('button'); b.type = 'button';
-      const t = thumbOf(m);
       b.innerHTML = `<img alt="" loading="lazy"><span></span>`;
-      if (t) $('img', b).src = t;
+      const t = thumbOf(m); if (t) $('img', b).src = t;
       $('span', b).textContent = m.name;
       b.addEventListener('click', () => pick(m, b));
       thumbs.appendChild(b);
@@ -931,76 +476,46 @@ function thumbOf(m) {
 }
 function escapeHTML(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
-// ---------- prices (estimate shown under "More options") ----------
-const FALLBACK = { 'anthropic/claude-sonnet-5.5': [2e-6, 10e-6], 'anthropic/claude-opus-5.5': [4e-6, 20e-6], 'anthropic/claude-haiku-5.5': [0.1e-6, 0.5e-6] };
-async function loadPrices() {
-  try {
-    const { data } = await (await fetch(`${OPENROUTER}/api/v1/models`)).json();
-    for (const m of data) if (m.id.startsWith('anthropic/')) state.prices[m.id] = [Number(m.pricing.prompt), Number(m.pricing.completion)];
-  } catch {}
-  updateEstimate();
-}
+// ---------- price estimate ----------
+const IMAGE_COST = { low: 0.005, medium: 0.011, high: 0.042, xhigh: 0.075 }; // 1536×1024, OpenAI's own estimates
 function updateEstimate() {
-  const m = $('#model').value;
-  const [i, o] = state.prices[m] || FALLBACK[m] || [0, 0];
-  const [pi, po] = state.prices[PLAN_MODEL] || FALLBACK[PLAN_MODEL] || [0, 0];
-  const cost = (900 * pi + 1200 * po) + (2600 * i + 5000 * o) + 0.003; // plan + drawing + picture review
-  $('#estimate').textContent = cost ? `About $${cost.toFixed(2)} per new drawing, charged to your OpenRouter account. Reopening an answer is free.` : '';
+  const img = IMAGE_COST[$('#quality').value] ?? 0.04;
+  $('#estimate').textContent = `About $${(0.01 + img).toFixed(2)} per new page: ~1¢ to Claude (OpenRouter) for the words, ~${Math.round(img * 100)}¢ to OpenAI for the picture. Reopening a page is free.`;
 }
 
-// ---------- sharing: the whole answer travels inside the link ----------
-// The answer (JSON with the SVG) is deflated and base64url-encoded into #r=…, so a reader
-// needs no sign-in and no AI: the page just unpacks and draws it. Typical link: 3–5 KB.
-async function encodeResult(payload) {
-  const bytes = new TextEncoder().encode(JSON.stringify(payload));
-  let out = bytes, tag = 'u';
-  if (typeof CompressionStream !== 'undefined') {
-    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-    out = new Uint8Array(await new Response(stream).arrayBuffer()); tag = 'd';
-  }
-  return tag + b64url(out);
+// ---------- storing & sharing ----------
+// The whole page (picture included) is stored by the link service; the browser keeps only the id.
+async function storeResult(result, q, signal) {
+  try {
+    const res = await fetch(`${LINKS_API}/`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sharePayload({ ...result, q })) });
+    const j = res.ok ? await res.json() : null;
+    return j?.id || null;
+  } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
-async function decodeResult(str) {
-  const tag = str[0]; const b64 = str.slice(1).replace(/-/g, '+').replace(/_/g, '/');
-  const bin = atob(b64); const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-  let json;
-  if (tag === 'd') {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-    json = await new Response(stream).text();
-  } else json = new TextDecoder().decode(bytes);
-  return JSON.parse(json);
+function sharePayload(result) {
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_id, image_prompt } = result;
+  const m = state.model3d;
+  const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_id: image_id || undefined, image_prompt, m3d, q: result.q || state.query };
 }
-// Short link: the answer is stored by the links service and the link carries only its id.
-// If the service can't be reached, the long link (answer inside the address) is used instead.
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
   const base = local ? SITE_URL : location.origin + location.pathname;
-  const slug = encodeURIComponent(fileSlug());
-  const payload = sharePayload(state.result);
-  if (state.shortId === undefined) {
-    try {
-      const res = await fetch(`${LINKS_API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const j = res.ok ? await res.json() : null;
-      state.shortId = j?.id || null;
-    } catch { state.shortId = null; }
+  if (!state.shortId) {
+    // the demo, or a page whose id was lost: store it now (the picture travels as its URL/data)
+    const r = state.result;
+    let image = r.image;
+    if (!image && r.image_id) image = undefined; // already stored; the server copies the picture by id
+    if (!image && !r.image_id) { try { image = await blobToDataUrl(await pictureBlob()); } catch {} }
+    state.shortId = await storeResult({ ...r, image }, state.query) || null;
   }
-  const url = state.shortId ? `${base}#${slug}/s=${state.shortId}` : `${base}#${slug}/r=${await encodeResult(payload)}`;
   renderAdmin();
-  $('#share-link-size').textContent = state.shortId ? 'Short link; the answer is kept by the link service' : `${(url.length / 1024).toFixed(1)} KB, everything inside the address`;
-  return url;
-}
-function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang } = result;
-  const svg = (result.svg || '').replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ');
-  const m = state.model3d;
-  const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, svg, lang, m3d, q: state.query };
+  return state.shortId ? `${base}#${encodeURIComponent(fileSlug())}/s=${state.shortId}` : location.href;
 }
 function openShare() {
   if (!state.result) return;
   $('#share-status').textContent = '';
   $('#share-native').hidden = !navigator.share;
-  shareUrl();
   $('#share-dialog').showModal();
 }
 function shareStatus(msg) { $('#share-status').textContent = msg; }
@@ -1009,29 +524,22 @@ function downloadBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-// The drawing as shown (with numbered labels), un-exploded, as a standalone SVG string.
-function currentSVG() {
-  const svg = $('#stage svg'); if (!svg) return '';
-  const clone = svg.cloneNode(true);
-  $$('[data-part]', clone).forEach((w) => { w.removeAttribute('style'); w.classList.remove('hot', 'now'); });
-  $$('.tmw-labels [data-label]', clone).forEach((l) => l.setAttribute('transform', `translate(${l.dataset.cx} ${l.dataset.cy})`));
-  clone.classList.remove('dim', 'exploded');
-  if (svg.dataset.vb) clone.setAttribute('viewBox', svg.dataset.vb);
-  clone.removeAttribute('class');
-  return new XMLSerializer().serializeToString(clone);
-}
-// One self-contained HTML file: the drawing (still animated), parts, steps, fact, links, and a
-// link back to the interactive version. Opens anywhere, offline, no scripts.
+async function pictureBlob() { return (await fetch(imageUrl(state.result))).blob(); }
+function blobToDataUrl(b) { return new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(b); }); }
+
+// One self-contained HTML file: picture, parts, steps, fact, links. Opens anywhere, offline.
 async function buildReport() {
   const r = state.result; const esc = escapeHTML;
   const rtl = RTL.test(r.lang || '');
   const link = await shareUrl();
-  const parts = (r.parts || []).map((p, i) => `<li><span class="n" style="background:${safeColor(p.color)}">${i + 1}</span><b>${esc(p.name)}</b><span>${esc(p.role)}</span></li>`).join('');
+  let img = imageUrl(r);
+  try { img = await blobToDataUrl(await pictureBlob()); } catch {}
+  const parts = (r.parts || []).map((p, i) => `<li><span class="n">${i + 1}</span><b>${esc(p.name)}</b><span>${esc(p.role)}</span></li>`).join('');
   const steps = (r.steps || []).map((st, i) => `<li><span class="n">${i + 1}</span><b>${esc(st.title)}</b><span>${esc(st.text)}</span></li>`).join('');
   const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
   const sk = `https://sketchfab.com/search?q=${encodeURIComponent(r.search_terms || state.query || '')}&type=models`;
   const m = state.model3d;
-  const model = m?.uid ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(m.url || 'https://sketchfab.com/3d-models/' + m.uid)}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection; drag to spin).</p>` : '';
+  const model = m?.uid ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(m.url || 'https://sketchfab.com/3d-models/' + m.uid)}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection).</p>` : '';
   return `<!doctype html><html lang="${langCode(r.lang)}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(r.title)} — How</title>
 <style>
@@ -1041,7 +549,7 @@ main{width:min(100% - 32px,900px);margin:0 auto;padding:24px 0 40px}
 h1{font-family:Fraunces,Georgia,serif;font-size:clamp(32px,6vw,52px);margin:4px 0 6px;text-align:center;line-height:1.05}
 .hook{text-align:center;font-style:italic;color:#4a5263;font-size:19px;max-width:640px;margin:0 auto 18px;font-family:Fraunces,Georgia,serif}
 .stage{border:2px solid #1d2433;border-radius:18px;overflow:hidden;background:#fbf4e4;box-shadow:0 10px 30px -14px rgba(29,36,51,.35)}
-.stage svg{display:block;width:100%;height:auto}
+.stage img{display:block;width:100%;height:auto}
 .stage.three{aspect-ratio:16/10;position:relative;background:#111}
 .stage.three iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .credit{color:#7d8494;font-size:13px;margin:8px 2px 0}.credit a{color:inherit}
@@ -1065,20 +573,20 @@ footer a{color:inherit}
 <p class="eyebrow">${r.kind === 'process' ? 'How it is done' : 'How it works'}</p>
 <h1>${esc(r.title)}</h1>
 <p class="hook">${esc(r.hook || '')}</p>
-<div class="stage">${currentSVG()}</div>
+<div class="stage"><img src="${esc(img)}" alt="${esc(r.title)}"></div>
 <h2>Parts</h2><ol>${parts}</ol>
 <h2>Step by step</h2><ol>${steps}</ol>
 ${r.fun_fact ? `<p class="fact"><b>Did you know?</b> ${esc(r.fun_fact)}</p>` : ''}
 ${model}
-<div class="links"><a class="main" href="${esc(link)}">Open the interactive version (pull it apart, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
-<footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Drawing by AI; check important details against a trusted source.</footer>
+<div class="links"><a class="main" href="${esc(link)}">Open on How (photos, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
+<footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Picture by AI; check important details against a trusted source.</footer>
 </main></body></html>`;
 }
 
-// "This drawing is wrong": store the answer (so it has an id) and flag it in the link service.
+// "Something wrong?": flag the page in the link service.
 async function flagWrong() {
   if (!state.result) return;
-  const reason = prompt('What is wrong with this drawing? (optional)') ?? null;
+  const reason = prompt('What is wrong with this page? (optional)') ?? null;
   if (reason === null) return;
   await shareUrl();
   if (!state.shortId) { $('#flag').textContent = 'Could not send (link service unreachable)'; return; }
@@ -1088,50 +596,39 @@ async function flagWrong() {
   } catch { $('#flag').textContent = 'Could not send'; }
   $('#flag').disabled = true;
 }
-// Owner: the list of flagged answers, opened with #flags once the admin secret is stored.
 async function showFlags() {
   if (!state.admin) { showError('Open the page with #admin=<secret> first.'); return; }
   try {
     const list = await (await fetch(`${LINKS_API}/flags`, { headers: { 'X-Admin': state.admin } })).json();
     const grid = $('#gallery-grid'); grid.innerHTML = '';
-    $('#gallery-home').hidden = false; $('.gallery-h', $('#gallery-home')).innerHTML = 'Flagged <em>drawings</em> <small>owner only</small>';
+    $('#gallery-home').hidden = false; $('.gallery-h', $('#gallery-home')).innerHTML = 'Flagged <em>pages</em> <small>owner only</small>';
     if (!list.length) { grid.innerHTML = '<p class="empty">Nothing flagged yet.</p>'; return; }
     for (const f of list) {
       const card = document.createElement('button'); card.type = 'button'; card.className = 'gcard';
       card.innerHTML = '<strong></strong><span></span>';
       $('strong', card).textContent = f.title || f.q; $('span', card).textContent = `${f.reason || 'no reason given'} · ${f.at.slice(0, 10)}`;
-      card.addEventListener('click', () => openGalleryItem({ id: f.id, title: f.title || f.q }));
+      card.addEventListener('click', () => openStored(f.id, f.title || f.q));
       grid.appendChild(card);
     }
   } catch { showError('Could not load the flags.'); }
 }
 
-// A follow-up question about one part, in the same language and for the same audience,
-// with the thing it belongs to for context.
+// A follow-up question about one part, same language and audience.
 function followUp(partName) {
   const parent = state.result?.title || state.query || '';
-  const q = parent ? `${partName} (of ${parent})` : partName;
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  ask(q);
+  ask(parent ? `${partName} (of ${parent})` : partName);
 }
 
-// ---------- gallery (curated answers, free to open) and the live drawing on the home page ----------
+// ---------- gallery (curated pages, free to open) and the picture under the headline ----------
 function galleryItems() {
-  const demo = typeof DEMO !== 'undefined' ? Object.entries(DEMO).map(([q, d]) => ({ id: null, demo: q, title: d.title, hook: d.hook, lang: 'English', svg: d.svg })) : [];
+  const demo = typeof DEMO !== 'undefined' ? Object.entries(DEMO).map(([q, d]) => ({ id: null, demo: q, title: d.title, hook: d.hook, lang: 'English', image: imageUrl(d) })) : [];
   return [...state.gallery, ...demo.filter((d) => !state.gallery.some((g) => g.title === d.title))];
 }
 async function loadGallery() {
-  try { const r = await fetch(`${LINKS_API}/gallery`); if (r.ok) state.gallery = (await r.json()).filter((g) => g && g.id && g.svg); } catch {}
+  try { const r = await fetch(`${LINKS_API}/gallery`); if (r.ok) state.gallery = (await r.json()).filter((g) => g && g.id).map((g) => ({ ...g, image: `${LINKS_API}/img/${g.id}` })); } catch {}
   renderGallery();
   renderHeroLive();
-}
-function thumbSVG(svgText) {
-  const svg = parseSVG(svgText); if (!svg) return null;
-  $$('script, foreignObject, image, iframe, object, embed, a', svg).forEach((n) => n.remove());
-  $$('*', svg).forEach((el) => { for (const a of [...el.attributes]) if (a.name.toLowerCase().startsWith('on')) el.removeAttribute(a.name); });
-  svg.removeAttribute('width'); svg.removeAttribute('height');
-  if (!svg.getAttribute('viewBox')) svg.setAttribute('viewBox', '0 0 800 520');
-  return document.importNode(svg, true);
 }
 function renderGallery() {
   const items = galleryItems();
@@ -1139,42 +636,48 @@ function renderGallery() {
   box.hidden = items.length === 0;
   items.slice(0, 24).forEach((g) => {
     const card = document.createElement('button'); card.type = 'button'; card.className = 'gcard';
-    card.innerHTML = '<div class="gthumb"></div><strong></strong><span></span>';
-    const svg = thumbSVG(g.svg); if (svg) $('.gthumb', card).appendChild(svg);
+    card.innerHTML = '<div class="gthumb"><img alt="" loading="lazy"></div><strong></strong><span></span>';
+    $('img', card).src = g.image;
     $('strong', card).textContent = g.title; $('span', card).textContent = g.hook || '';
     if (RTL.test(g.lang || '')) card.setAttribute('dir', 'rtl');
     card.addEventListener('click', () => openGalleryItem(g));
     grid.appendChild(card);
   });
 }
-async function openGalleryItem(g) {
+function openGalleryItem(g) {
   if (g.demo) { $('#lang').value = 'English'; ask(g.demo); return; }
-  try {
-    startLoading(g.title);
-    const r = await (await fetch(`${LINKS_API}/${g.id}`)).json();
-    const q = r.q || r.title; delete r.q;
-    location.hash = `${encodeURIComponent(g.title.replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${g.id}`;
-    show(r, q, { free: true }); state.shortId = g.id; renderAdmin();
-  } catch { showError('Could not open that answer right now.'); }
+  openStored(g.id, g.title);
 }
-// A moving drawing right under the headline, so the first second shows what the page does.
+async function openStored(id, title, { shared = false } = {}) {
+  try {
+    startLoading(title || 'the page');
+    const res = await fetch(`${LINKS_API}/${id}`);
+    if (!res.ok) throw new Error();
+    const r = await res.json();
+    const q = r.q || r.title; delete r.q;
+    r.image = undefined; r.image_id = id; // the picture is served by the link service
+    $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
+    location.hash = `${encodeURIComponent((r.title || q).replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${id}`;
+    state.shortId = id;
+    show(r, q, { free: true, shared, keepShort: true });
+    cachePut(cacheKey(q, r.lang || 'English', $('#level').value), r);
+  } catch { showError('This page could not be opened. The link may be mistyped, or the link service is unreachable right now.'); }
+}
 function renderHeroLive() {
   if (document.body.classList.contains('has-result')) return;
   const items = galleryItems(); const box = $('#hero-live'); if (!items.length) { box.hidden = true; return; }
   const g = items[Math.floor(Math.random() * Math.min(items.length, 8))];
-  const svg = thumbSVG(g.svg); if (!svg) { box.hidden = true; return; }
-  $('#hero-live-stage').innerHTML = ''; $('#hero-live-stage').appendChild(svg);
+  $('#hero-live-stage').innerHTML = ''; const img = document.createElement('img'); img.src = g.image; img.alt = g.title; $('#hero-live-stage').appendChild(img);
   $('#hero-live-title').textContent = g.title;
   box.hidden = false;
   box.onclick = () => openGalleryItem(g);
 }
-// Owner mode: open the page once with #admin=<secret> and "Add to gallery" appears on every answer.
 async function galleryAdd() {
   if (!state.result || !state.admin) return;
   await shareUrl();
-  if (!state.shortId) { $('#gallery-add').textContent = 'Could not store the answer (link service unreachable)'; return; }
+  if (!state.shortId) { $('#gallery-add').textContent = 'Could not store the page (link service unreachable)'; return; }
   const r = state.result;
-  const res = await fetch(`${LINKS_API}/gallery`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin': state.admin }, body: JSON.stringify({ id: state.shortId, title: r.title, hook: r.hook, lang: r.lang, q: state.query, svg: sharePayload(r).svg }) });
+  const res = await fetch(`${LINKS_API}/gallery`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin': state.admin }, body: JSON.stringify({ id: state.shortId, title: r.title, hook: r.hook, lang: r.lang, q: state.query }) });
   const j = await res.json().catch(() => ({}));
   $('#gallery-add').textContent = res.ok ? `In the gallery (${j.count})` : `Not added: ${j.error || res.status}`;
   if (res.ok) loadGallery();
@@ -1193,23 +696,31 @@ function renderAdmin() {
 // ---------- wiring ----------
 $('#ask').addEventListener('submit', (e) => { e.preventDefault(); ask($('#q').value); });
 $$('.chip', $('#chips')).forEach((c) => c.addEventListener('click', () => { if (c.classList.contains('chip-demo')) $('#lang').value = 'English'; ask(c.dataset.q); }));
-$('#signin').addEventListener('click', () => signIn(false));
+$('#signin').addEventListener('click', signIn);
 $('#signout').addEventListener('click', signOut);
+$('#oa-set').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
+$('#oa-change').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
+$('#key-cancel').addEventListener('click', () => $('#key-dialog').close());
+$('#key-forget').addEventListener('click', () => { setOaKey(null); $('#key-dialog').close(); });
+$('#key-form').addEventListener('submit', () => {
+  const k = $('#key-input').value.trim(); if (!k) return;
+  setOaKey(k);
+  const pending = store.get('pending_q', sessionStorage);
+  if (pending && state.key) { store.del('pending_q', sessionStorage); setTimeout(() => ask(pending), 50); }
+});
 $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
-$('#model').addEventListener('change', updateEstimate);
+$('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$('#play').addEventListener('click', () => setPlaying(!playing));
-$('#explode').addEventListener('input', (e) => explode(e.target.value / 100));
-$('#callout-close').addEventListener('click', () => { $('#callout').hidden = true; clearHighlight(); });
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.plan ? { ...state.result.plan, photo: undefined } : null }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? state.result : null }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
-$('#flag').addEventListener('click', flagWrong);
 $('#gallery-remove').addEventListener('click', galleryRemove);
+$('#flag').addEventListener('click', flagWrong);
 $('#share-link').addEventListener('click', async () => {
+  shareStatus('Making the link…');
   const url = await shareUrl();
-  try { await navigator.clipboard.writeText(url); shareStatus('Link copied. Anyone who opens it sees this answer, no sign-in needed.'); }
+  try { await navigator.clipboard.writeText(url); shareStatus('Link copied. Anyone who opens it sees this page, no sign-in needed.'); }
   catch { prompt('Copy this link:', url); }
 });
 $('#share-native').addEventListener('click', async () => {
@@ -1217,60 +728,34 @@ $('#share-native').addEventListener('click', async () => {
   try { await navigator.share({ title: `${state.result?.title} — How`, text: state.result?.hook || '', url }); } catch {}
 });
 $('#share-report').addEventListener('click', async () => {
+  shareStatus('Building the report…');
   const html = await buildReport();
   downloadBlob(new Blob([html], { type: 'text/html' }), `${fileSlug()}-how.html`);
-  shareStatus('Report saved. It opens in any browser, offline, with the drawing moving.');
+  shareStatus('Report saved. It opens in any browser, offline.');
 });
-$('#share-svg').addEventListener('click', () => {
-  downloadBlob(new Blob([currentSVG()], { type: 'image/svg+xml' }), `${fileSlug()}.svg`);
-  shareStatus('Drawing saved.');
+$('#share-svg').addEventListener('click', async () => {
+  try { downloadBlob(await pictureBlob(), `${fileSlug()}.jpg`); shareStatus('Picture saved.'); } catch { shareStatus('Could not download the picture.'); }
 });
 $('#privacy').addEventListener('click', () => $('#privacy-dialog').showModal());
-$('#paste-key').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
-$('#key-cancel').addEventListener('click', () => $('#key-dialog').close());
-$('#key-form').addEventListener('submit', () => { const k = $('#key-input').value.trim(); if (k) setKey(k); });
-window.addEventListener('hashchange', () => { /* links are handled on load only */ });
 
 (async function init() {
   state.key = store.get('or_key');
+  state.oaKey = store.get('oa_key');
   await finishSignIn();
   renderAuth();
   renderRecent();
-  loadPrices();
+  updateEstimate();
   const h = new URLSearchParams(location.hash.slice(1).replace(/^[^=]*\//, ''));
-  if (h.get('admin')) { store.set('tmw_admin', h.get('admin')); history.replaceState(null, '', callbackUrl()); }
-  state.admin = store.get('tmw_admin');
+  if (h.get('admin')) { store.set('how_admin', h.get('admin')); history.replaceState(null, '', callbackUrl()); }
+  state.admin = store.get('how_admin') || store.get('tmw_admin');
   if (location.hash === '#flags') { await loadGallery(); showFlags(); return; }
   loadGallery();
-  const shared = h.get('r'); const shortId = h.get('s');
-  if (shortId && /^[a-z0-9]{5,12}$/.test(shortId)) {
-    try {
-      startLoading('the shared answer');
-      const res = await fetch(`${LINKS_API}/${shortId}`);
-      if (!res.ok) throw new Error();
-      const r = await res.json();
-      const q = r.q || r.title; delete r.q;
-      $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
-      show(r, q, { free: true, shared: true });
-      state.shortId = shortId;
-      if (r.svg) cachePut(cacheKey(q, r.lang || 'English', $('#level').value), r);
-      return;
-    } catch { showError('This shared link could not be opened. It may have been mistyped, or the link service is unreachable right now.'); }
-  }
-  if (shared) {
-    try {
-      const r = await decodeResult(shared);
-      const q = r.q || r.title; delete r.q;
-      $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
-      show(r, q, { free: true, shared: true });
-      if (r.svg) cachePut(cacheKey(q, r.lang || 'English', $('#level').value), r);
-      return;
-    } catch { showError('This shared link is damaged or incomplete. Ask the sender to share it again.'); }
-  }
+  const shortId = h.get('s');
+  if (shortId && /^[a-z0-9]{5,12}$/.test(shortId)) { openStored(shortId, '', { shared: true }); return; }
   const q = h.get('q'); const lang = h.get('lang');
   if (lang && $(`#lang option[value="${CSS.escape(lang)}"]`)) $('#lang').value = lang;
   const pending = store.get('pending_q', sessionStorage);
-  if (pending && state.key) { store.del('pending_q', sessionStorage); ask(pending); return; }
+  if (pending && state.key && state.oaKey) { store.del('pending_q', sessionStorage); ask(pending); return; }
   if (q) {
     $('#q').value = q;
     const demo = typeof DEMO !== 'undefined' && DEMO[q.toLowerCase()];

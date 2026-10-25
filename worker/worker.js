@@ -1,6 +1,7 @@
 // How — link service (Cloudflare Worker + KV).
 //   POST /              body: an answer (max 64 KB)          → { id }
-//   GET  /<id>          → the answer
+//   GET  /<id>          → the answer (without the picture bytes)
+//   GET  /img/<id>      → the picture (jpeg)
 //   GET  /gallery       → the curated list [{ id, title, hook, lang, svg }]
 //   POST /gallery       header X-Admin: <ADMIN_SECRET>, body { id, title, hook, lang, svg } → adds it
 //   DELETE /gallery/<id> header X-Admin                      → removes it
@@ -11,7 +12,7 @@
 // Bindings: KV namespace as LINKS. Optional secret ADMIN_SECRET (for the gallery).
 
 const ALLOWED = ['https://how.sala.company', 'https://jamalxcode.github.io', 'http://localhost:8765', 'http://127.0.0.1:8765'];
-const MAX_BYTES = 64 * 1024;
+const MAX_BYTES = 6 * 1024 * 1024; // answers carry a picture (~300–900 KB as base64)
 const GALLERY_MAX = 60;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no look-alikes
 const UA = 'HowSalaCompany/1.0 (https://how.sala.company)';
@@ -114,10 +115,10 @@ export default {
       if (req.method === 'POST') {
         if (!isAdmin(req, env)) return json({ error: 'not allowed' }, 403, h);
         let item; try { item = await req.json(); } catch { return json({ error: 'not json' }, 400, h); }
-        if (!/^[a-z0-9]{5,12}$/.test(item?.id || '') || typeof item.svg !== 'string' || typeof item.title !== 'string') return json({ error: 'bad item' }, 400, h);
+        if (!/^[a-z0-9]{5,12}$/.test(item?.id || '') || typeof item.title !== 'string') return json({ error: 'bad item' }, 400, h);
         if (!(await env.LINKS.get(item.id))) return json({ error: 'unknown id' }, 404, h);
         const list = JSON.parse((await env.LINKS.get('gallery:list')) || '[]').filter((x) => x.id !== item.id);
-        list.unshift({ id: item.id, title: item.title.slice(0, 80), hook: String(item.hook || '').slice(0, 200), lang: String(item.lang || 'English').slice(0, 20), q: String(item.q || '').slice(0, 120), svg: item.svg.slice(0, 20000) });
+        list.unshift({ id: item.id, title: item.title.slice(0, 80), hook: String(item.hook || '').slice(0, 200), lang: String(item.lang || 'English').slice(0, 20), q: String(item.q || '').slice(0, 120) });
         await env.LINKS.put('gallery:list', JSON.stringify(list.slice(0, GALLERY_MAX)));
         return json({ ok: true, count: Math.min(list.length, GALLERY_MAX) }, 200, h);
       }
@@ -146,6 +147,13 @@ export default {
       return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}$/.test(path)) {
+      const pid = path.split('/')[2];
+      const img = await env.LINKS.get(`img:${pid}`, { type: 'arrayBuffer' });
+      if (!img) return json({ error: 'not found' }, 404, h);
+      return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
+    }
+
     const key = path.slice(1);
     if (req.method === 'GET' && /^[a-z0-9]{5,12}$/.test(key)) {
       const body = await env.LINKS.get(key);
@@ -160,11 +168,20 @@ export default {
       if (text.length > MAX_BYTES) return json({ error: 'too large' }, 413, h);
       let data;
       try { data = JSON.parse(text); } catch { return json({ error: 'not json' }, 400, h); }
-      if (!data || typeof data.svg !== 'string' || typeof data.title !== 'string') return json({ error: 'not an answer' }, 400, h);
-      // same answer → same id, so re-sharing never fills the store
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+      if (!data || typeof data.title !== 'string') return json({ error: 'not an answer' }, 400, h);
+      // the picture: either new bytes (data URL) or a reference to one already stored (image_id)
+      let imgBytes = null;
+      const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(data.image || '');
+      if (m) { imgBytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)); data.image_type = `image/${m[1]}`; }
+      else if (data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) { imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' }); }
+      delete data.image;
+      // same answer (+ same picture) → same id, so re-sharing never fills the store
+      const body = JSON.stringify(data);
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '')));
       const k = [...new Uint8Array(digest).slice(0, 7)].map((x) => ALPHABET[x % ALPHABET.length]).join('');
-      await env.LINKS.put(k, text);
+      data.image_id = imgBytes ? k : (data.image_id || undefined);
+      await env.LINKS.put(k, JSON.stringify(data));
+      if (imgBytes) await env.LINKS.put(`img:${k}`, imgBytes);
       return json({ id: k }, 200, h);
     }
 
