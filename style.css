@@ -331,6 +331,8 @@ body.has-result .hero-sub { display: none; }
 .hero-live-stage img, .gthumb img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; }
 
 /* ---- whole / pulled apart ---- */
-.pic-toggle { display: flex; justify-content: center; gap: 0; margin: 12px auto 0; width: max-content; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
-.pic-toggle button { border: 0; background: var(--paper-2); padding: 8px 18px; font-weight: 800; font-size: 14px; }
-.pic-toggle button.active { background: var(--ink); color: var(--paper); }
+.pic-toggle { position: absolute; top: 12px; left: 12px; display: flex; gap: 0; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; box-shadow: var(--shadow); z-index: 2; }
+.pic-toggle button { border: 0; background: #fbf4e4; color: #1d2433; padding: 8px 16px; font-weight: 800; font-size: 14px; }
+.pic-toggle button.active { background: #1d2433; color: #fbf4e4; }
+.result[dir="rtl"] .pic-toggle { left: auto; right: 12px; }
+@media (max-width: 560px) { .pic-toggle button { padding: 7px 12px; font-size: 13px; } }

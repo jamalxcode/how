@@ -377,7 +377,7 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
 
   const hasWhole = !!wholeUrl(result);
   $('#pic-toggle').hidden = !hasWhole;
-  pictureMode = 'exploded';
+  pictureMode = hasWhole ? 'whole' : 'exploded';
   renderPicture();
 
   const parts = $('#parts'); parts.innerHTML = '';
@@ -413,6 +413,7 @@ function renderPicture() {
   $$('#pic-toggle button').forEach((b) => b.classList.toggle('active', b.dataset.mode === pictureMode));
   if (!url) { picture.innerHTML = '<p class="empty">No picture for this one.</p>'; return; }
   const img = document.createElement('img'); img.src = url; img.decoding = 'async';
+  if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => { pictureMode = pictureMode === 'whole' ? 'exploded' : 'whole'; renderPicture(); }); }
   img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
   img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
   picture.appendChild(img);
