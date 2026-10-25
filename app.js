@@ -246,8 +246,7 @@ async function paint(prompt, signal) {
 // ---------- a look at the finished picture ----------
 const REVIEW_MODEL = 'anthropic/claude-haiku-5.5';
 const REVIEW_SCHEMA = { type: 'json_schema', json_schema: { name: 'review', strict: true, schema: { type: 'object', additionalProperties: false,
-  required: ['ok', 'problems', 'badges'], properties: { ok: { type: 'boolean' }, problems: { type: 'array', items: { type: 'string' } },
-  badges: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['n', 'x', 'y'], properties: { n: { type: 'integer' }, x: { type: 'number' }, y: { type: 'number' } } } } } } } };
+  required: ['ok', 'problems'], properties: { ok: { type: 'boolean' }, problems: { type: 'array', items: { type: 'string' } } } } } };
 
 // Does each numbered badge sit on the part the list says, drawn as described, nothing duplicated or missing?
 async function reviewPicture(dataUrl, plan, signal, mode) {
@@ -257,15 +256,29 @@ async function reviewPicture(dataUrl, plan, signal, mode) {
       { role: 'system', content: 'You check illustrations for a children\'s "how it works" book. Be strict, concrete and brief. Answer as JSON only.' },
       { role: 'user', content: [
         { type: 'text', text: `This should be ${mode === 'whole' ? 'the assembled' : 'an exploded view of the'} ${plan.title_en || plan.wikipedia_title || plan.title}, with numbered badges meaning: ${list}.
-Check: (a) every number 1–${plan.parts.length} appears exactly once and sits on or points to the right part; (b) each part is drawn as what it is — in particular a part that is ONE half of a pair must not be drawn as the complete object (e.g. a scissor half with two finger rings); (c) no stray text or letters. "ok" true only if all pass. "problems": up to 3 one-sentence fixes for the painter, naming the number and what to change.
-"badges": the centre of each number badge as a percentage of the image width (x) and height (y), 0–100, one entry per number you can see.` },
+Check: (a) every number 1–${plan.parts.length} appears exactly once and sits on or points to the right part; (b) each part is drawn as what it is — in particular a part that is ONE half of a pair must not be drawn as the complete object (e.g. a scissor half with two finger rings); (c) no stray text or letters. "ok" true only if all pass. "problems": up to 3 one-sentence fixes for the painter, naming the number and what to change.` },
         { type: 'image_url', image_url: { url: dataUrl } },
       ] },
     ] });
     const j = parseJSON(text);
-    const badges = (j.badges || []).filter((b) => Number.isInteger(b.n) && b.n >= 1 && b.n <= plan.parts.length && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100);
-    return { ok: !!j.ok, problems: (j.problems || []).slice(0, 3), badges };
+    return { ok: !!j.ok, problems: (j.problems || []).slice(0, 3) };
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
+}
+
+// Where is each number badge? Plain JSON, no strict schema, so it works with every provider.
+async function locateBadges(imageUrlOrData, count, signal) {
+  try {
+    const text = await callAI({ model: REVIEW_MODEL, maxTokens: 300, signal, messages: [
+      { role: 'system', content: 'You locate labels in images. Reply with JSON only, no prose.' },
+      { role: 'user', content: [
+        { type: 'text', text: `This picture has white circles with bold numbers 1 to ${count}. For each number you can see, give the centre of its circle as percentages of the image width (x) and height (y), 0–100, one decimal. Reply exactly like: {"badges":[{"n":1,"x":12.5,"y":40.0},…]}` },
+        { type: 'image_url', image_url: { url: imageUrlOrData } },
+      ] },
+    ] });
+    const j = parseJSON(text);
+    return (j.badges || []).map((b) => ({ n: Number(b.n), x: Number(b.x), y: Number(b.y) }))
+      .filter((b) => Number.isInteger(b.n) && b.n >= 1 && b.n <= count && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100);
+  } catch (e) { if (e?.name === 'AbortError') throw e; return []; }
 }
 
 // Paint, look, and repaint once if the look found problems.
@@ -280,7 +293,8 @@ async function paintChecked(prompt, plan, signal, mode, onStatus) {
       if (!r2 || r2.ok || r2.problems.length <= r.problems.length) { img = again; r = r2 || r; }
     } catch (e) { if (e?.name === 'AbortError') throw e; }
   }
-  return { img, badges: r?.badges || [] };
+  const badges = await locateBadges(img, plan.parts.length, signal);
+  return { img, badges };
 }
 
 // ---------- the flow ----------
@@ -424,8 +438,18 @@ function renderPicture() {
   img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
   img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
   picture.appendChild(img);
-  // tappable number badges, where the reviewer saw them
+  // tappable number badges, where the reviewer saw them (found on the spot for pages that lack them)
   const badges = result.badges?.[pictureMode] || [];
+  if (!badges.length && !result.painting && state.key && result.parts?.length && !result._locating?.[pictureMode]) {
+    result._locating = { ...(result._locating || {}), [pictureMode]: true };
+    const mode = pictureMode;
+    locateBadges(url, result.parts.length, undefined).then((found) => {
+      if (!found.length || state.result !== result) return;
+      result.badges = { ...(result.badges || {}), [mode]: found };
+      if (pictureMode === mode) renderPicture();
+      if (state.shortId) cachePut(cacheKey(state.query, result.lang || 'English', $('#level').value), result);
+    });
+  }
   for (const b of badges) {
     const hot = document.createElement('button'); hot.type = 'button'; hot.className = 'hot'; hot.style.left = `${b.x}%`; hot.style.top = `${b.y}%`;
     const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.dataset.name = part?.name || '';
