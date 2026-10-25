@@ -348,3 +348,10 @@ body.has-result .hero-sub { display: none; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(228,87,46,.8); } 100% { box-shadow: 0 0 0 18px rgba(228,87,46,0); } }
 .parts li { cursor: pointer; }
 .parts li.hot { border-color: var(--red); box-shadow: 0 0 0 3px rgba(228,87,46,.18); }
+
+/* ---- label beside the mouse over a number ---- */
+.tip { position: fixed; z-index: 50; pointer-events: none; display: flex; gap: 10px; align-items: flex-start; max-width: 280px;
+  background: var(--ink); color: var(--paper); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); font-size: 14px; line-height: 1.35; }
+.tip-num { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; background: var(--red); color: #fff; font-weight: 900; display: grid; place-items: center; font-size: 13px; }
+.tip strong { display: block; font-family: var(--font-display); font-size: 16px; }
+.tip span:not(.tip-num) { color: #d9d2c2; }

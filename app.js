@@ -428,8 +428,11 @@ function renderPicture() {
   const badges = result.badges?.[pictureMode] || [];
   for (const b of badges) {
     const hot = document.createElement('button'); hot.type = 'button'; hot.className = 'hot'; hot.style.left = `${b.x}%`; hot.style.top = `${b.y}%`;
-    const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.title = part?.name || '';
-    hot.addEventListener('click', (e) => { e.stopPropagation(); pingPart(b.n); });
+    const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.dataset.name = part?.name || '';
+    hot.addEventListener('click', (e) => { e.stopPropagation(); pingPart(b.n); showTip(e, b.n, part); setTimeout(hideTip, 2200); });
+    hot.addEventListener('mouseenter', (e) => showTip(e, b.n, part));
+    hot.addEventListener('mousemove', (e) => moveTip(e));
+    hot.addEventListener('mouseleave', hideTip);
     picture.appendChild(hot);
   }
   // preload the other one so the toggle is instant
@@ -437,11 +440,27 @@ function renderPicture() {
   if (other) { const pre = new Image(); pre.src = other; }
 }
 
+// The label that follows the mouse over a number badge.
+function showTip(e, n, part) {
+  const tip = $('#tip'); if (!part) return;
+  $('#tip-num').textContent = n; $('#tip-name').textContent = part.name; $('#tip-role').textContent = part.role || '';
+  tip.hidden = false; moveTip(e);
+}
+function moveTip(e) {
+  const tip = $('#tip'); if (tip.hidden) return;
+  const pad = 14; const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = e.clientX - w - pad;
+  if (y + h > window.innerHeight - 8) y = e.clientY - h - pad;
+  tip.style.left = `${x}px`; tip.style.top = `${y}px`;
+}
+function hideTip() { $('#tip').hidden = true; }
+
 // Tap a number on the picture → its card lights up and scrolls into view; tap a card → its badge pulses.
 function pingPart(n) {
   $$('#parts li').forEach((li, i) => li.classList.toggle('hot', i === n - 1));
   const li = $(`#parts li:nth-child(${n})`); li?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  $$('#picture .hot').forEach((h) => h.classList.toggle('pulse', h.title === (state.result.parts?.[n - 1]?.name || '')));
+  $$('#picture .hot').forEach((h) => h.classList.toggle('pulse', h.dataset.name === (state.result.parts?.[n - 1]?.name || '')));
   setTimeout(() => { li?.classList.remove('hot'); $$('#picture .hot.pulse').forEach((h) => h.classList.remove('pulse')); }, 2500);
 }
 
