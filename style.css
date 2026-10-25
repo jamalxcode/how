@@ -336,3 +336,15 @@ body.has-result .hero-sub { display: none; }
 .pic-toggle button.active { background: #1d2433; color: #fbf4e4; }
 .result[dir="rtl"] .pic-toggle { left: auto; right: 12px; }
 @media (max-width: 560px) { .pic-toggle button { padding: 7px 12px; font-size: 13px; } }
+
+/* ---- painting placeholder, tappable badges ---- */
+.picture { position: relative; }
+.painting { aspect-ratio: 3 / 2; display: grid; place-content: center; text-align: center; color: var(--muted); padding: 20px; }
+.painting p { margin: 6px 0 0; }
+.paint-status { font-size: 13px; min-height: 1.2em; }
+.picture .hot { position: absolute; width: 7%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 0; background: transparent; cursor: pointer; padding: 0; }
+.picture .hot:hover, .picture .hot.pulse { box-shadow: 0 0 0 4px rgba(228,87,46,.75), 0 0 0 10px rgba(228,87,46,.25); }
+.picture .hot.pulse { animation: pulse 1.2s ease-out 2; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(228,87,46,.8); } 100% { box-shadow: 0 0 0 18px rgba(228,87,46,0); } }
+.parts li { cursor: pointer; }
+.parts li.hot { border-color: var(--red); box-shadow: 0 0 0 3px rgba(228,87,46,.18); }

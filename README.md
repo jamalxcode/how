@@ -14,8 +14,8 @@ It's a static site on GitHub Pages. Visitors sign in with their own OpenRouter a
 
 1. **Type a thing** (or tap a suggestion; *Scissors* is a built-in demo). Pick a language and who it's for (a curious adult, a 10-year-old, an engineering student).
 2. **Show me.** Claude works out the parts and steps and writes the picture prompt (~1¢); OpenAI's image model paints the exploded view (~4¢ at high quality, set under *More options*). Both through OpenRouter. About 30 seconds.
-3. **Three views:** **Pulled apart** (the picture, numbered parts with a "How does this work?" link on each, step by step, a fun fact), **Real thing** (Wikipedia photos), **3D** (a Sketchfab model to spin).
-4. **Share.** A short link (`…/#scissors/s=k7x2mq9`) opens the same page for anyone, no sign-in. *Download report* saves one self-contained HTML file with the picture inside; *Download picture* saves the image. *Draw it again* keeps the words and paints a new picture.
+3. **Four views:** **Pulled apart** (the exploded view), **Whole** (the thing assembled, same numbers), **Real thing** (Wikipedia photos), **3D** (a Sketchfab model to spin). Under the picture: the numbered parts with a "How does this work?" link on each, step by step, a fun fact. The words appear as soon as Claude answers (~5 s); the two pictures fill in as they are painted. Tap a number on the picture and its card lights up; tap a card and its badge pulses.
+4. **Share.** A short link (`…/#scissors/s=k7x2mq9`) opens the same page for anyone, no sign-in. *Download report* saves one self-contained HTML file with the picture inside; *Download picture* saves the image. *Paint again* keeps the words and paints new pictures; *Remake* starts over with new words too.
 
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic. The home page shows a page from the gallery under the headline and a **Browse answers** grid, free to open.
 
@@ -34,7 +34,7 @@ Question + language + audience
 ```
 
 - **The key stays in the browser.** OpenRouter via OAuth PKCE (or a pasted key). It is never sent to this site or the link service.
-- **Every picture is checked:** a cheap vision model looks at it against the parts list (each number once, on the right part; a scissor half drawn as a half, not a whole pair; no stray text). If it fails, one repaint with the corrections appended.
+- **Every picture is checked:** a cheap vision model looks at it against the parts list (each number once, on the right part; a scissor half drawn as a half, not a whole pair; no stray text). If it fails, one repaint with the corrections appended. The same look returns where each badge is, which is what makes the numbers tappable.
 - **Same page → same id.** Storing is content-addressed, so re-sharing never fills the store.
 - **"Something wrong?"** under every page flags it; the owner sees the list at `#flags`.
 - **Gallery:** the owner (page opened once with `#admin=<ADMIN_SECRET>`) gets an *Add to gallery* button.

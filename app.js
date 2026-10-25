@@ -246,7 +246,8 @@ async function paint(prompt, signal) {
 // ---------- a look at the finished picture ----------
 const REVIEW_MODEL = 'anthropic/claude-haiku-5.5';
 const REVIEW_SCHEMA = { type: 'json_schema', json_schema: { name: 'review', strict: true, schema: { type: 'object', additionalProperties: false,
-  required: ['ok', 'problems'], properties: { ok: { type: 'boolean' }, problems: { type: 'array', items: { type: 'string' } } } } } };
+  required: ['ok', 'problems', 'badges'], properties: { ok: { type: 'boolean' }, problems: { type: 'array', items: { type: 'string' } },
+  badges: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['n', 'x', 'y'], properties: { n: { type: 'integer' }, x: { type: 'number' }, y: { type: 'number' } } } } } } } };
 
 // Does each numbered badge sit on the part the list says, drawn as described, nothing duplicated or missing?
 async function reviewPicture(dataUrl, plan, signal, mode) {
@@ -256,28 +257,30 @@ async function reviewPicture(dataUrl, plan, signal, mode) {
       { role: 'system', content: 'You check illustrations for a children\'s "how it works" book. Be strict, concrete and brief. Answer as JSON only.' },
       { role: 'user', content: [
         { type: 'text', text: `This should be ${mode === 'whole' ? 'the assembled' : 'an exploded view of the'} ${plan.title_en || plan.wikipedia_title || plan.title}, with numbered badges meaning: ${list}.
-Check: (a) every number 1–${plan.parts.length} appears exactly once and sits on or points to the right part; (b) each part is drawn as what it is — in particular a part that is ONE half of a pair must not be drawn as the complete object (e.g. a scissor half with two finger rings); (c) no stray text or letters. "ok" true only if all pass. "problems": up to 3 one-sentence fixes for the painter, naming the number and what to change.` },
+Check: (a) every number 1–${plan.parts.length} appears exactly once and sits on or points to the right part; (b) each part is drawn as what it is — in particular a part that is ONE half of a pair must not be drawn as the complete object (e.g. a scissor half with two finger rings); (c) no stray text or letters. "ok" true only if all pass. "problems": up to 3 one-sentence fixes for the painter, naming the number and what to change.
+"badges": the centre of each number badge as a percentage of the image width (x) and height (y), 0–100, one entry per number you can see.` },
         { type: 'image_url', image_url: { url: dataUrl } },
       ] },
     ] });
     const j = parseJSON(text);
-    return { ok: !!j.ok, problems: (j.problems || []).slice(0, 3) };
+    const badges = (j.badges || []).filter((b) => Number.isInteger(b.n) && b.n >= 1 && b.n <= plan.parts.length && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100);
+    return { ok: !!j.ok, problems: (j.problems || []).slice(0, 3), badges };
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 
 // Paint, look, and repaint once if the look found problems.
-async function paintChecked(prompt, plan, signal, mode) {
+async function paintChecked(prompt, plan, signal, mode, onStatus) {
   let img = await paint(prompt, signal);
-  const r = await reviewPicture(img, plan, signal, mode);
+  let r = await reviewPicture(img, plan, signal, mode);
   if (r && !r.ok && r.problems.length) {
-    setLoading(null, `Fixing the picture: ${r.problems[0].slice(0, 70)}…`);
+    onStatus?.(`Fixing: ${r.problems[0].slice(0, 60)}…`);
     try {
       const again = await paint(`${prompt}\n\nCorrections to the previous attempt, which must be fixed: ${r.problems.join(' ')}`, signal);
       const r2 = await reviewPicture(again, plan, signal, mode);
-      if (!r2 || r2.ok || r2.problems.length <= r.problems.length) img = again;
+      if (!r2 || r2.ok || r2.problems.length <= r.problems.length) { img = again; r = r2 || r; }
     } catch (e) { if (e?.name === 'AbortError') throw e; }
   }
-  return img;
+  return { img, badges: r?.badges || [] };
 }
 
 // ---------- the flow ----------
@@ -288,7 +291,7 @@ function setLoading(title, msg) {
   if (msg) $('#loading-msg').textContent = msg;
 }
 function startLoading(q) {
-  $('#loading').hidden = false; $('#result').hidden = true; $('#error').hidden = true;
+  $('#loading').hidden = false; $('#result').hidden = true; $('#error').hidden = true; document.body.classList.remove('has-result');
   setLoading(`Drawing ${q}…`, LOADING_LINES[0]);
   let i = 1; clearInterval(loadingTimer);
   loadingTimer = setInterval(() => { setLoading(null, LOADING_LINES[i++ % LOADING_LINES.length]); }, 3200);
@@ -324,23 +327,24 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     let plan = reusePlan;
     if (!plan) { setLoading(null, 'Working out which part does what'); plan = await makePlan(q, lang, level, ctrl.signal); }
     if (ctrl.signal.aborted) return;
-    const result = { ...plan, image: null, image_whole: null, image_id: null, lang, cost: 0 };
-    if (plan.kind !== 'refused') {
-      setLoading(null, 'Painting the whole thing (20–40 s)');
-      const wholeP = plan.whole_prompt ? paintChecked(plan.whole_prompt, plan, ctrl.signal, 'whole').catch((e) => { if (e?.name === 'AbortError') throw e; return null; }) : Promise.resolve(null);
-      const explodedP = paintChecked(plan.image_prompt, plan, ctrl.signal, 'exploded');
-      result.image_whole = await wholeP;
-      if (ctrl.signal.aborted) return;
-      setLoading(null, 'Pulling it apart (20–40 s)');
-      result.image = await explodedP;
-      if (ctrl.signal.aborted) return;
-      setLoading(null, 'Saving');
-      const id = await storeResult(result, q, ctrl.signal);
-      if (id) { result.image_id = id; result.has_whole = !!result.image_whole; result.image = null; result.image_whole = null; state.shortId = id; } else state.shortId = null;
-    }
+    const result = { ...plan, image: null, image_whole: null, image_id: null, lang, cost: 0, badges: {} };
+    if (plan.kind === 'refused') { show(result, q, { keepShort: true }); return; }
+    // the words go on screen now; the pictures arrive as they are painted
+    state.shortId = null;
+    show(result, q, { keepShort: true, painting: true });
+    const paintStatus = (which, msg) => { const el = $(`#paint-status-${which}`); if (el) el.textContent = msg; };
+    const explodedP = paintChecked(plan.image_prompt, plan, ctrl.signal, 'exploded', (m) => paintStatus('exploded', m))
+      .then((r) => { if (ctrl.signal.aborted) return; result.image = r.img; result.badges.exploded = r.badges; if (state.result === result) { $('#tab-whole').hidden = !wholeUrl(result); if (pictureMode === 'exploded') renderPicture(); } });
+    const wholeP = plan.whole_prompt
+      ? paintChecked(plan.whole_prompt, plan, ctrl.signal, 'whole', (m) => paintStatus('whole', m)).then((r) => { if (ctrl.signal.aborted) return; result.image_whole = r.img; result.badges.whole = r.badges; if (state.result === result) { $('#tab-whole').hidden = false; if (pictureMode === 'whole') renderPicture(); } }).catch((e) => { if (e?.name === 'AbortError') throw e; })
+      : Promise.resolve();
+    await Promise.all([explodedP, wholeP]);
+    if (ctrl.signal.aborted) return;
+    const id = await storeResult(result, q, ctrl.signal);
+    if (id) { result.image_id = id; result.has_whole = !!result.image_whole; result.image = null; result.image_whole = null; state.shortId = id; } else state.shortId = null;
     result.cost = state.cost;
-    if (plan.kind !== 'refused') cachePut(cacheKey(q, lang, level), result);
-    show(result, q, { keepShort: true });
+    cachePut(cacheKey(q, lang, level), result);
+    if (state.result === result) { result.painting = false; $('#cost').textContent = result.cost ? `This page cost $${result.cost.toFixed(3)}` : ''; renderAdmin(); renderPicture(); }
   } catch (e) {
     if (e.name === 'AbortError') { stopLoading(); return; }
     showError(e.message);
@@ -352,8 +356,8 @@ function imageUrl(r) { return r.image || (r.image_id ? `${LINKS_API}/img/${r.ima
 function wholeUrl(r) { return r.image_whole || (r.has_whole && r.image_id ? `${LINKS_API}/img/${r.image_id}/whole` : ''); }
 let pictureMode = 'exploded';
 
-function show(result, q, { free = false, shared = false, keepShort = false } = {}) {
-  state.result = result; state.query = q;
+function show(result, q, { free = false, shared = false, keepShort = false, painting = false } = {}) {
+  state.result = result; state.query = q; result.painting = painting;
   if (!keepShort) state.shortId = result.image_id || undefined;
   stopLoading();
   $('#error').hidden = true;
@@ -370,7 +374,7 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
   $('#fact').textContent = result.fun_fact || '';
   $('#shared-note').hidden = !shared;
   $('#hero-live').hidden = true;
-  $('#cost').textContent = shared ? '' : free ? 'Free (already made)' : result.cost ? `This page cost $${result.cost.toFixed(3)}` : '';
+  $('#cost').textContent = painting ? 'Painting…' : shared ? '' : free ? 'Free (already made)' : result.cost ? `This page cost $${result.cost.toFixed(3)}` : '';
   $('#gallery-add').textContent = 'Add to gallery';
   $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
@@ -388,6 +392,7 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
     const more = document.createElement('button'); more.type = 'button'; more.className = 'ask-more'; more.textContent = 'How does this work? →';
     more.addEventListener('click', (e) => { e.stopPropagation(); followUp(p.name); });
     li.appendChild(more);
+    li.addEventListener('click', () => pingPart(i + 1));
     parts.appendChild(li);
   });
   const steps = $('#steps'); steps.innerHTML = '';
@@ -408,15 +413,36 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
 function renderPicture() {
   const result = state.result; const picture = $('#picture'); picture.innerHTML = '';
   const url = pictureMode === 'whole' ? wholeUrl(result) : imageUrl(result);
-  if (!url) { picture.innerHTML = '<p class="empty">No picture for this one.</p>'; return; }
+  if (!url) {
+    picture.innerHTML = result.painting
+      ? `<div class="painting"><div class="loader"><svg viewBox="0 0 120 120" width="72" height="72" aria-hidden="true"><circle cx="60" cy="60" r="44" fill="none" stroke="#d9cdb2" stroke-width="10" stroke-dasharray="40 30" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="6s" repeatCount="indefinite"/></circle><circle cx="60" cy="60" r="22" fill="none" stroke="#e4572e" stroke-width="10" stroke-dasharray="22 14" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="360 60 60" to="0 60 60" dur="3s" repeatCount="indefinite"/></circle></svg></div><p>${pictureMode === 'whole' ? 'Painting the whole thing' : 'Painting the exploded view'} (20–40 s)</p><p class="paint-status" id="paint-status-${pictureMode}"></p></div>`
+      : '<p class="empty">No picture for this one.</p>';
+    return;
+  }
   const img = document.createElement('img'); img.src = url; img.decoding = 'async';
   if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => setView(pictureMode === 'whole' ? 'exploded' : 'whole')); }
   img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
   img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
   picture.appendChild(img);
+  // tappable number badges, where the reviewer saw them
+  const badges = result.badges?.[pictureMode] || [];
+  for (const b of badges) {
+    const hot = document.createElement('button'); hot.type = 'button'; hot.className = 'hot'; hot.style.left = `${b.x}%`; hot.style.top = `${b.y}%`;
+    const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.title = part?.name || '';
+    hot.addEventListener('click', (e) => { e.stopPropagation(); pingPart(b.n); });
+    picture.appendChild(hot);
+  }
   // preload the other one so the toggle is instant
   const other = pictureMode === 'whole' ? imageUrl(result) : wholeUrl(result);
   if (other) { const pre = new Image(); pre.src = other; }
+}
+
+// Tap a number on the picture → its card lights up and scrolls into view; tap a card → its badge pulses.
+function pingPart(n) {
+  $$('#parts li').forEach((li, i) => li.classList.toggle('hot', i === n - 1));
+  const li = $(`#parts li:nth-child(${n})`); li?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  $$('#picture .hot').forEach((h) => h.classList.toggle('pulse', h.title === (state.result.parts?.[n - 1]?.name || '')));
+  setTimeout(() => { li?.classList.remove('hot'); $$('#picture .hot.pulse').forEach((h) => h.classList.remove('pulse')); }, 2500);
 }
 
 function langCode(name) {
@@ -554,10 +580,10 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, m3d, q: result.q || state.query };
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query };
 }
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
@@ -774,7 +800,8 @@ $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false } : null }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {} } : null }));
+$('#remake').addEventListener('click', () => ask(state.query, { force: true }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
 $('#gallery-remove').addEventListener('click', galleryRemove);
