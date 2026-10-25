@@ -5,7 +5,6 @@
 'use strict';
 
 const OPENROUTER = 'https://openrouter.ai';
-const OPENAI = 'https://api.openai.com/v1';
 const APP_TITLE = 'How';
 const SITE_URL = 'https://how.sala.company/';
 const LINKS_API = 'https://how-links.jamal-akuna-matata.workers.dev';
@@ -13,13 +12,13 @@ const CACHE_KEY = 'how_cache_v2';
 const CACHE_MAX = 24;
 const RTL = /^(arabic|urdu|persian|hebrew)$/i;
 const PLAN_MODEL = 'anthropic/claude-sonnet-5.5';
-const IMAGE_MODEL = 'gpt-image-2.5-flare';
+const IMAGE_MODEL = 'openai/gpt-image-2.5-flare';
 const IMAGE_SIZE = '1536x1024';
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
-const state = { key: null, oaKey: null, result: null, query: null, abort: null, cost: 0, model3d: null, shortId: undefined, admin: null, gallery: [] };
+const state = { key: null, result: null, query: null, abort: null, cost: 0, model3d: null, shortId: undefined, admin: null, gallery: [] };
 
 const store = {
   get(k, s = localStorage) { try { return s.getItem(k); } catch { return null; } },
@@ -69,12 +68,9 @@ async function finishSignIn() {
 
 function setKey(key) { state.key = key; store.set('or_key', key); renderAuth(); }
 function signOut() { state.key = null; store.del('or_key'); renderAuth(); }
-function setOaKey(key) { state.oaKey = key || null; if (key) store.set('oa_key', key); else store.del('oa_key'); renderAuth(); }
 function renderAuth() {
   $('#signin').hidden = !!state.key;
   $('#signedin').hidden = !state.key;
-  $('#oa-set').hidden = !!state.oaKey;
-  $('#oa-ok').hidden = !state.oaKey;
 }
 
 // ---------- cache of answers (so a question is paid for once per browser) ----------
@@ -215,30 +211,29 @@ async function callAI({ model, messages, maxTokens, responseFormat, signal }) {
   }, signal, 'OpenRouter');
 }
 
-// ---------- step 2: OpenAI paints the picture ----------
+// ---------- step 2: the picture, painted by OpenAI's image model through OpenRouter ----------
 async function paint(prompt, signal) {
   return withRetry(async () => {
-    const res = await fetch(`${OPENAI}/images/generations`, {
+    const res = await fetch(`${OPENROUTER}/api/v1/images`, {
       method: 'POST', signal,
-      headers: { Authorization: `Bearer ${state.oaKey}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${state.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': callbackUrl(), 'X-Title': APP_TITLE },
       body: JSON.stringify({ model: IMAGE_MODEL, prompt, size: IMAGE_SIZE, quality: $('#quality').value, output_format: 'jpeg', output_compression: 85, n: 1 }),
     });
     if (!res.ok) {
       let msg = `${res.status}`;
       try { const j = await res.json(); msg = j.error?.message || msg; } catch {}
-      if (res.status === 401) { setOaKey(null); throw new Error('OpenAI did not accept the key. Paste it again (top right).'); }
-      if (res.status === 403 && /verif/i.test(msg)) throw new Error('OpenAI says this organisation must be verified before it can make images: platform.openai.com → Settings → Organization → Verify.');
-      if (res.status === 429 && /quota|billing|insufficient/i.test(msg)) throw new Error('Your OpenAI account has no credit for images. Add credit at platform.openai.com/settings/organization/billing.');
+      if (res.status === 401) { signOut(); throw new Error('Your OpenRouter session expired. Please sign in again.'); }
+      if (res.status === 402) throw new Error('Your OpenRouter account is out of credit. Add credit at openrouter.ai/settings/credits.');
       if (RETRY_STATUS.has(res.status)) throw new RetryableError(`Image request failed: ${msg}`);
       throw new Error(`Image request failed: ${msg}`);
     }
     const j = await res.json();
-    const b64 = j.data?.[0]?.b64_json;
-    if (!b64) throw new Error('OpenAI returned no image.');
-    const u = j.usage || {};
-    state.cost += (Number(u.output_tokens) || 0) * 30e-6 + (Number(u.input_tokens) || 0) * 5e-6; // Flare/Sunburst list prices
-    return `data:image/jpeg;base64,${b64}`;
-  }, signal, 'OpenAI');
+    if (j.error) throw new RetryableError(j.error.message || 'The image model returned an error');
+    const d = j.data?.[0];
+    if (!d?.b64_json) throw new Error('The image model returned no picture.');
+    if (j.usage?.cost != null) state.cost += Number(j.usage.cost);
+    return `data:${d.media_type || 'image/jpeg'};base64,${d.b64_json}`;
+  }, signal, 'OpenRouter');
 }
 
 // ---------- the flow ----------
@@ -271,7 +266,6 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     if (cached) { show(cached, q, { free: true }); return; }
   }
   if (!state.key) { store.set('pending_q', q, sessionStorage); showError('To make a new page, sign in to OpenRouter first (top right). The demo and the gallery are free.'); $('#signin').focus(); return; }
-  if (!state.oaKey) { store.set('pending_q', q, sessionStorage); $('#key-dialog').showModal(); return; }
 
   state.abort?.abort();
   const ctrl = new AbortController(); state.abort = ctrl;
@@ -480,7 +474,7 @@ function escapeHTML(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&am
 const IMAGE_COST = { low: 0.005, medium: 0.011, high: 0.042, xhigh: 0.075 }; // 1536×1024, OpenAI's own estimates
 function updateEstimate() {
   const img = IMAGE_COST[$('#quality').value] ?? 0.04;
-  $('#estimate').textContent = `About $${(0.01 + img).toFixed(2)} per new page: ~1¢ to Claude (OpenRouter) for the words, ~${Math.round(img * 100)}¢ to OpenAI for the picture. Reopening a page is free.`;
+  $('#estimate').textContent = `About $${(0.01 + img).toFixed(2)} per new page (~1¢ for the words, ~${Math.round(img * 100)}¢ for the picture), charged to your OpenRouter account. Reopening a page is free.`;
 }
 
 // ---------- storing & sharing ----------
@@ -698,15 +692,13 @@ $('#ask').addEventListener('submit', (e) => { e.preventDefault(); ask($('#q').va
 $$('.chip', $('#chips')).forEach((c) => c.addEventListener('click', () => { if (c.classList.contains('chip-demo')) $('#lang').value = 'English'; ask(c.dataset.q); }));
 $('#signin').addEventListener('click', signIn);
 $('#signout').addEventListener('click', signOut);
-$('#oa-set').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
-$('#oa-change').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
+$('#paste-key').addEventListener('click', () => { $('#key-input').value = ''; $('#key-dialog').showModal(); });
 $('#key-cancel').addEventListener('click', () => $('#key-dialog').close());
-$('#key-forget').addEventListener('click', () => { setOaKey(null); $('#key-dialog').close(); });
 $('#key-form').addEventListener('submit', () => {
   const k = $('#key-input').value.trim(); if (!k) return;
-  setOaKey(k);
+  setKey(k);
   const pending = store.get('pending_q', sessionStorage);
-  if (pending && state.key) { store.del('pending_q', sessionStorage); setTimeout(() => ask(pending), 50); }
+  if (pending) { store.del('pending_q', sessionStorage); setTimeout(() => ask(pending), 50); }
 });
 $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
@@ -740,7 +732,6 @@ $('#privacy').addEventListener('click', () => $('#privacy-dialog').showModal());
 
 (async function init() {
   state.key = store.get('or_key');
-  state.oaKey = store.get('oa_key');
   await finishSignIn();
   renderAuth();
   renderRecent();
@@ -755,7 +746,7 @@ $('#privacy').addEventListener('click', () => $('#privacy-dialog').showModal());
   const q = h.get('q'); const lang = h.get('lang');
   if (lang && $(`#lang option[value="${CSS.escape(lang)}"]`)) $('#lang').value = lang;
   const pending = store.get('pending_q', sessionStorage);
-  if (pending && state.key && state.oaKey) { store.del('pending_q', sessionStorage); ask(pending); return; }
+  if (pending && state.key) { store.del('pending_q', sessionStorage); ask(pending); return; }
   if (q) {
     $('#q').value = q;
     const demo = typeof DEMO !== 'undefined' && DEMO[q.toLowerCase()];

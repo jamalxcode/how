@@ -30,11 +30,6 @@
         <span class="dot"></span><span class="signed-label">OpenRouter</span>
         <button id="signout" class="link" type="button">sign out</button>
       </span>
-      <button id="oa-set" class="btn btn-ghost btn-sm" type="button">OpenAI key</button>
-      <span id="oa-ok" class="signed" hidden>
-        <span class="dot"></span><span class="signed-label">OpenAI</span>
-        <button id="oa-change" class="link" type="button">change</button>
-      </span>
     </div>
   </div>
 </header>
@@ -100,6 +95,7 @@
             </select>
           </label>
           <p class="hint" id="estimate"></p>
+          <p class="hint">Rather paste a key? <button type="button" class="link" id="paste-key">Use an OpenRouter API key</button></p>
         </details>
       </div>
     </form>
@@ -195,16 +191,16 @@
 </main>
 
 <footer class="foot">
-  <p>How is a free, static page: your OpenRouter and OpenAI accounts pay the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
+  <p>How is a free, static page: your OpenRouter account pays the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
     <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
 </footer>
 
 <dialog id="privacy-dialog" class="dialog">
   <h3>Privacy</h3>
   <table>
-    <tr><th>Your question &amp; language</th><td>Sent to Claude (via OpenRouter) for the words and to OpenAI for the picture when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
+    <tr><th>Your question &amp; language</th><td>Sent through OpenRouter to Claude (the words) and OpenAI's image model (the picture) when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
     <tr><th>The page you get</th><td>Stored by this site's link service (so it can be shared and reopened free). It holds no name or account; only what you asked and the picture.</td></tr>
-    <tr><th>OpenRouter sign-in and OpenAI key</th><td>Kept in your browser until you sign out / forget the key. Never sent to this site.</td></tr>
+    <tr><th>OpenRouter sign-in</th><td>Kept in your browser until you sign out. Never sent to this site.</td></tr>
     <tr><th>Analytics</th><td>Page views only (GoatCounter, no cookies).</td></tr>
   </table>
   <form method="dialog"><button class="btn btn-primary btn-sm">OK</button></form>
@@ -224,12 +220,11 @@
 </dialog>
 
 <dialog id="key-dialog" class="dialog">
-  <h3>Your OpenAI key paints the picture</h3>
-  <p>The words come from Claude through OpenRouter; the picture is painted by OpenAI's image model (about 4¢ each). Paste an OpenAI API key once; it stays in this browser only. Create one at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.</p>
+  <h3>Use an OpenRouter API key</h3>
+  <p>Create one at <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener">openrouter.ai/settings/keys</a>. It stays in this browser only.</p>
   <form method="dialog" id="key-form">
-    <input id="key-input" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false">
+    <input id="key-input" type="password" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false">
     <div class="dialog-actions">
-      <button type="button" class="link" id="key-forget">Forget key</button>
       <button type="button" class="btn btn-ghost btn-sm" id="key-cancel">Cancel</button>
       <button class="btn btn-primary btn-sm" value="ok">Save</button>
     </div>
@@ -237,7 +232,7 @@
 </dialog>
 
 <script src="demo.js?v=20"></script>
-<script src="app.js?v=20"></script>
+<script src="app.js?v=21"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {
