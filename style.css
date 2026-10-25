@@ -329,3 +329,8 @@ body.has-result .hero-sub { display: none; }
 .picture .empty { padding: 60px 20px; }
 .list-h { font-family: var(--font-display); font-size: 20px; margin: 22px 0 8px; }
 .hero-live-stage img, .gthumb img { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: cover; }
+
+/* ---- whole / pulled apart ---- */
+.pic-toggle { display: flex; justify-content: center; gap: 0; margin: 12px auto 0; width: max-content; border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
+.pic-toggle button { border: 0; background: var(--paper-2); padding: 8px 18px; font-weight: 800; font-size: 14px; }
+.pic-toggle button.active { background: var(--ink); color: var(--paper); }

@@ -14,7 +14,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
@@ -162,6 +162,10 @@
 
     <div class="view" id="view-picture">
       <div class="stage"><div class="picture" id="picture"></div></div>
+      <div class="pic-toggle" id="pic-toggle" hidden role="group" aria-label="Picture">
+        <button type="button" data-mode="whole">Whole</button>
+        <button type="button" data-mode="exploded" class="active">Pulled apart</button>
+      </div>
       <h3 class="list-h">Parts</h3>
       <ol class="parts" id="parts"></ol>
       <h3 class="list-h">Step by step</h3>
@@ -232,7 +236,7 @@
 </dialog>
 
 <script src="demo.js?v=20"></script>
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

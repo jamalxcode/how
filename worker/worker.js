@@ -1,7 +1,8 @@
 // How — link service (Cloudflare Worker + KV).
 //   POST /              body: an answer (max 64 KB)          → { id }
 //   GET  /<id>          → the answer (without the picture bytes)
-//   GET  /img/<id>      → the picture (jpeg)
+//   GET  /img/<id>      → the exploded-view picture (jpeg)
+//   GET  /img/<id>/whole → the assembled picture, if any
 //   GET  /gallery       → the curated list [{ id, title, hook, lang, svg }]
 //   POST /gallery       header X-Admin: <ADMIN_SECRET>, body { id, title, hook, lang, svg } → adds it
 //   DELETE /gallery/<id> header X-Admin                      → removes it
@@ -147,9 +148,9 @@ export default {
       return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}$/.test(path)) {
-      const pid = path.split('/')[2];
-      const img = await env.LINKS.get(`img:${pid}`, { type: 'arrayBuffer' });
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole)?$/.test(path)) {
+      const pid = path.split('/')[2]; const whole = path.endsWith('/whole');
+      const img = await env.LINKS.get(whole ? `imgw:${pid}` : `img:${pid}`, { type: 'arrayBuffer' });
       if (!img) return json({ error: 'not found' }, 404, h);
       return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
@@ -170,11 +171,14 @@ export default {
       try { data = JSON.parse(text); } catch { return json({ error: 'not json' }, 400, h); }
       if (!data || typeof data.title !== 'string') return json({ error: 'not an answer' }, 400, h);
       // the picture: either new bytes (data URL) or a reference to one already stored (image_id)
-      let imgBytes = null;
-      const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(data.image || '');
-      if (m) { imgBytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)); data.image_type = `image/${m[1]}`; }
-      else if (data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) { imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' }); }
-      delete data.image;
+      const decode = (v) => { const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(v || ''); return m ? Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)) : null; };
+      let imgBytes = decode(data.image), wholeBytes = decode(data.image_whole);
+      if (!imgBytes && data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) {
+        imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' });
+        if (!wholeBytes) wholeBytes = await env.LINKS.get(`imgw:${data.image_id}`, { type: 'arrayBuffer' });
+      }
+      delete data.image; delete data.image_whole;
+      data.has_whole = !!wholeBytes;
       // same answer (+ same picture) → same id, so re-sharing never fills the store
       const body = JSON.stringify(data);
       const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '')));
@@ -182,6 +186,7 @@ export default {
       data.image_id = imgBytes ? k : (data.image_id || undefined);
       await env.LINKS.put(k, JSON.stringify(data));
       if (imgBytes) await env.LINKS.put(`img:${k}`, imgBytes);
+      if (wholeBytes) await env.LINKS.put(`imgw:${k}`, wholeBytes);
       return json({ id: k }, 200, h);
     }
 

@@ -79,7 +79,7 @@ function loadCache() { try { return JSON.parse(store.get(CACHE_KEY) || '{}'); } 
 function cacheGet(k) { return loadCache()[k] || null; }
 function cachePut(k, result) {
   const c = loadCache();
-  c[k] = { ...result, image: undefined, at: Date.now() }; // the picture lives in the link service
+  c[k] = { ...result, image: result.image_id ? undefined : result.image, image_whole: result.image_id ? undefined : result.image_whole, at: Date.now() }; // pictures live in the link service
   const keys = Object.keys(c).sort((a, b) => c[b].at - c[a].at);
   keys.slice(CACHE_MAX).forEach((old) => delete c[old]);
   store.set(CACHE_KEY, JSON.stringify(c));
@@ -109,7 +109,7 @@ const PLAN_SCHEMA = {
     name: 'explainer', strict: true,
     schema: {
       type: 'object', additionalProperties: false,
-      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'parts', 'steps', 'image_prompt'],
+      required: ['title', 'hook', 'kind', 'wikipedia_title', 'search_terms', 'fun_fact', 'parts', 'steps', 'image_prompt', 'whole_prompt'],
       properties: {
         title: { type: 'string' }, hook: { type: 'string' },
         kind: { type: 'string', enum: ['object', 'diagram', 'process', 'refused'] },
@@ -119,6 +119,7 @@ const PLAN_SCHEMA = {
         steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['title', 'text'],
           properties: { title: { type: 'string' }, text: { type: 'string' } } } },
         image_prompt: { type: 'string' },
+        whole_prompt: { type: 'string' },
       },
     },
   },
@@ -127,15 +128,19 @@ const PLAN_SCHEMA = {
 function planPrompt(lang, level) {
   return `You write the pages of a children's "how it works" picture encyclopedia: the reader learns by LOOKING. Each page is ONE big picture (an exploded or cutaway view, painted by an image model from your prompt) with numbered parts and a few short steps. Answer as JSON only.
 
-Write title, hook, part names/roles, steps and fun_fact in ${lang}, for ${level}. "name_en" is the part's English name. Keep text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words; 4–8 parts; 3–6 steps. Choose the parts by what makes the thing DO its job, including hidden ones that matter (a phone: antenna and radio chip; a fridge: compressor and refrigerant loop). A part is a physical thing you could touch.
+Write title, hook, part names/roles, steps and fun_fact in ${lang}, for ${level}. "title" is just the thing's name ("Skateboard", not "How a Skateboard Works"). "name_en" is the part's English name. Keep text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words; 4–8 parts; 3–6 steps. Choose the parts by what makes the thing DO its job, including hidden ones that matter (a phone: antenna and radio chip; a fridge: compressor and refrigerant loop). A part is a physical thing you could touch.
 "kind": "object" for a thing made of parts (engine, scissors, can opener); "diagram" for a principle shown between things (reading glasses, why planes fly); "process" (how a house is built: parts are its stages); "refused" only if unsafe (weapons, explosives, drugs, harming people) or meaningless, then explain in hook and leave the rest empty.
 "wikipedia_title": English Wikipedia article title. "search_terms": 2–3 English words to find a 3D model.
 
-"image_prompt" (English, 90–170 words) is the most important field; the picture must match your parts list. Write it in this order:
-1. The thing by name, with its real appearance and proportions in two sentences.
+Two picture prompts, in English, same style sentence in both so they look like one book. STYLE = "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, three-quarter view, evenly lit, centred with margins, nothing cropped. No text, words or letters anywhere except the number badges."
+
+"whole_prompt" (60–110 words): the thing by name, assembled and complete, as it looks in use, with its real appearance and proportions described in two sentences; where it helps, a hint of its context (a can under the opener, a hand's position) but the thing itself fills the frame. Then: "Each of these parts is marked where it sits with a small white circle containing a bold black number: 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the parts-list order. Then STYLE.
+
+"image_prompt" (90–170 words), the exploded view; it must match your parts list. In this order:
+1. The thing by name, real appearance and proportions, two sentences.
 2. The view: for an "object", "exploded view: the parts separated along one axis in their real order, real relative sizes, small gaps, thin grey leader lines"; for a "diagram", a clear cutaway or scene; for a "process", a left-to-right sequence of stages.
-3. "Every one of these parts is clearly visible and marked with a white circle containing a bold black number: 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the same order as the parts list. Then: "Number badges only. No other text, words or letters anywhere."
-4. Style: "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, three-quarter view, evenly lit, the whole thing centred with margins, nothing cropped."`;
+3. "Every one of these parts is clearly visible and marked with a white circle containing a bold black number placed right next to that part (not in a column at the edge): 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the parts-list order.
+4. STYLE.`;
 }
 
 async function askJSON({ model, messages, schema, maxTokens, signal }) {
@@ -280,14 +285,19 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     let plan = reusePlan;
     if (!plan) { setLoading(null, 'Working out which part does what'); plan = await makePlan(q, lang, level, ctrl.signal); }
     if (ctrl.signal.aborted) return;
-    const result = { ...plan, image: null, image_id: null, lang, cost: 0 };
+    const result = { ...plan, image: null, image_whole: null, image_id: null, lang, cost: 0 };
     if (plan.kind !== 'refused') {
-      setLoading(null, 'Painting the picture (20–40 s)');
-      result.image = await paint(plan.image_prompt, ctrl.signal);
+      setLoading(null, 'Painting the whole thing (20–40 s)');
+      const wholeP = plan.whole_prompt ? paint(plan.whole_prompt, ctrl.signal).catch(() => null) : Promise.resolve(null);
+      const explodedP = paint(plan.image_prompt, ctrl.signal);
+      result.image_whole = await wholeP;
+      if (ctrl.signal.aborted) return;
+      setLoading(null, 'Pulling it apart (20–40 s)');
+      result.image = await explodedP;
       if (ctrl.signal.aborted) return;
       setLoading(null, 'Saving');
       const id = await storeResult(result, q, ctrl.signal);
-      if (id) { result.image_id = id; state.shortId = id; } else state.shortId = null;
+      if (id) { result.image_id = id; result.has_whole = !!result.image_whole; result.image = null; result.image_whole = null; state.shortId = id; } else state.shortId = null;
     }
     result.cost = state.cost;
     if (plan.kind !== 'refused') cachePut(cacheKey(q, lang, level), result);
@@ -300,6 +310,8 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
 
 // ---------- rendering ----------
 function imageUrl(r) { return r.image || (r.image_id ? `${LINKS_API}/img/${r.image_id}` : ''); }
+function wholeUrl(r) { return r.image_whole || (r.has_whole && r.image_id ? `${LINKS_API}/img/${r.image_id}/whole` : ''); }
+let pictureMode = 'exploded';
 
 function show(result, q, { free = false, shared = false, keepShort = false } = {}) {
   state.result = result; state.query = q;
@@ -324,13 +336,10 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
   $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
 
-  const picture = $('#picture'); picture.innerHTML = '';
-  const url = imageUrl(result);
-  if (url) {
-    const img = document.createElement('img'); img.src = url; img.alt = `${result.title}: exploded view with numbered parts`; img.decoding = 'async';
-    img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
-    picture.appendChild(img);
-  } else picture.innerHTML = '<p class="empty">No picture for this one.</p>';
+  const hasWhole = !!wholeUrl(result);
+  $('#pic-toggle').hidden = !hasWhole;
+  pictureMode = 'exploded';
+  renderPicture();
 
   const parts = $('#parts'); parts.innerHTML = '';
   (result.parts || []).forEach((p, i) => {
@@ -357,6 +366,20 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   loadPhotos(result.wikipedia_title || q);
   load3D(result.search_terms || q, result.m3d);
+}
+
+function renderPicture() {
+  const result = state.result; const picture = $('#picture'); picture.innerHTML = '';
+  const url = pictureMode === 'whole' ? wholeUrl(result) : imageUrl(result);
+  $$('#pic-toggle button').forEach((b) => b.classList.toggle('active', b.dataset.mode === pictureMode));
+  if (!url) { picture.innerHTML = '<p class="empty">No picture for this one.</p>'; return; }
+  const img = document.createElement('img'); img.src = url; img.decoding = 'async';
+  img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
+  img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
+  picture.appendChild(img);
+  // preload the other one so the toggle is instant
+  const other = pictureMode === 'whole' ? imageUrl(result) : wholeUrl(result);
+  if (other) { const pre = new Image(); pre.src = other; }
 }
 
 function langCode(name) {
@@ -479,7 +502,7 @@ function escapeHTML(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&am
 const IMAGE_COST = { low: 0.005, medium: 0.011, high: 0.042, xhigh: 0.075 }; // 1536×1024, OpenAI's own estimates
 function updateEstimate() {
   const img = IMAGE_COST[$('#quality').value] ?? 0.04;
-  $('#estimate').textContent = `About $${(0.01 + img).toFixed(2)} per new page (~1¢ for the words, ~${Math.round(img * 100)}¢ for the picture), charged to your OpenRouter account. Reopening a page is free.`;
+  $('#estimate').textContent = `About $${(0.01 + 2 * img).toFixed(2)} per new page (~1¢ for the words, ~${Math.round(img * 100)}¢ for each of the two pictures), charged to your OpenRouter account. Reopening a page is free.`;
 }
 
 // ---------- storing & sharing ----------
@@ -492,10 +515,10 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_id, image_prompt } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_id: image_id || undefined, image_prompt, m3d, q: result.q || state.query };
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, m3d, q: result.q || state.query };
 }
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
@@ -532,7 +555,9 @@ async function buildReport() {
   const rtl = RTL.test(r.lang || '');
   const link = await shareUrl();
   let img = imageUrl(r);
-  try { img = await blobToDataUrl(await pictureBlob()); } catch {}
+  try { img = await blobToDataUrl(await (await fetch(imageUrl(r))).blob()); } catch {}
+  let whole = wholeUrl(r);
+  if (whole) { try { whole = await blobToDataUrl(await (await fetch(whole)).blob()); } catch {} }
   const parts = (r.parts || []).map((p, i) => `<li><span class="n">${i + 1}</span><b>${esc(p.name)}</b><span>${esc(p.role)}</span></li>`).join('');
   const steps = (r.steps || []).map((st, i) => `<li><span class="n">${i + 1}</span><b>${esc(st.title)}</b><span>${esc(st.text)}</span></li>`).join('');
   const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
@@ -572,6 +597,7 @@ footer a{color:inherit}
 <p class="eyebrow">${r.kind === 'process' ? 'How it is done' : 'How it works'}</p>
 <h1>${esc(r.title)}</h1>
 <p class="hook">${esc(r.hook || '')}</p>
+${whole ? `<div class="stage"><img src="${esc(whole)}" alt="${esc(r.title)}"></div><h2>Pulled apart</h2>` : ''}
 <div class="stage"><img src="${esc(img)}" alt="${esc(r.title)}"></div>
 <h2>Parts</h2><ol>${parts}</ol>
 <h2>Step by step</h2><ol>${steps}</ol>
@@ -654,7 +680,7 @@ async function openStored(id, title, { shared = false } = {}) {
     if (!res.ok) throw new Error();
     const r = await res.json();
     const q = r.q || r.title; delete r.q;
-    r.image = undefined; r.image_id = id; // the picture is served by the link service
+    r.image = undefined; r.image_whole = undefined; r.image_id = id; // pictures are served by the link service
     $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
     location.hash = `${encodeURIComponent((r.title || q).replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${id}`;
     state.shortId = id;
@@ -709,7 +735,8 @@ $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? state.result : null }));
+$$('#pic-toggle button').forEach((b) => b.addEventListener('click', () => { pictureMode = b.dataset.mode; renderPicture(); }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false } : null }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
 $('#gallery-remove').addEventListener('click', galleryRemove);
