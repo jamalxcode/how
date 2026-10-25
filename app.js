@@ -375,10 +375,8 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
   $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
 
-  const hasWhole = !!wholeUrl(result);
-  $('#pic-toggle').hidden = !hasWhole;
-  pictureMode = hasWhole ? 'whole' : 'exploded';
-  renderPicture();
+  $('#tab-whole').hidden = !wholeUrl(result);
+  pictureMode = 'exploded';
 
   const parts = $('#parts'); parts.innerHTML = '';
   (result.parts || []).forEach((p, i) => {
@@ -401,7 +399,7 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
     steps.appendChild(li);
   });
 
-  setView('picture');
+  setView('exploded');
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   loadPhotos(result.wikipedia_title || q);
   load3D(result.search_terms || q, result.m3d);
@@ -410,10 +408,9 @@ function show(result, q, { free = false, shared = false, keepShort = false } = {
 function renderPicture() {
   const result = state.result; const picture = $('#picture'); picture.innerHTML = '';
   const url = pictureMode === 'whole' ? wholeUrl(result) : imageUrl(result);
-  $$('#pic-toggle button').forEach((b) => b.classList.toggle('active', b.dataset.mode === pictureMode));
   if (!url) { picture.innerHTML = '<p class="empty">No picture for this one.</p>'; return; }
   const img = document.createElement('img'); img.src = url; img.decoding = 'async';
-  if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => { pictureMode = pictureMode === 'whole' ? 'exploded' : 'whole'; renderPicture(); }); }
+  if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => setView(pictureMode === 'whole' ? 'exploded' : 'whole')); }
   img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
   img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
   picture.appendChild(img);
@@ -435,7 +432,9 @@ function loadArabicFont() {
 }
 function setView(view) {
   $$('.tab').forEach((t) => { const on = t.dataset.view === view; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
-  $('#view-picture').hidden = view !== 'picture';
+  const pic = view === 'exploded' || view === 'whole';
+  if (pic) { pictureMode = view; renderPicture(); }
+  $('#view-picture').hidden = !pic;
   $('#view-photos').hidden = view !== 'photos';
   $('#view-model3d').hidden = view !== 'model3d';
 }
@@ -775,7 +774,6 @@ $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$$('#pic-toggle button').forEach((b) => b.addEventListener('click', () => { pictureMode = b.dataset.mode; renderPicture(); }));
 $('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false } : null }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
