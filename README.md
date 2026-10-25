@@ -34,6 +34,7 @@ Question + language + audience
 ```
 
 - **The key stays in the browser.** OpenRouter via OAuth PKCE (or a pasted key). It is never sent to this site or the link service.
+- **Every picture is checked:** a cheap vision model looks at it against the parts list (each number once, on the right part; a scissor half drawn as a half, not a whole pair; no stray text). If it fails, one repaint with the corrections appended.
 - **Same page → same id.** Storing is content-addressed, so re-sharing never fills the store.
 - **"Something wrong?"** under every page flags it; the owner sees the list at `#flags`.
 - **Gallery:** the owner (page opened once with `#admin=<ADMIN_SECRET>`) gets an *Add to gallery* button.

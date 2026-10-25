@@ -136,6 +136,8 @@ Two picture prompts, in English, same style sentence in both so they look like o
 
 "whole_prompt" (60–110 words): the thing by name, assembled and complete, as it looks in use, with its real appearance and proportions described in two sentences; where it helps, a hint of its context (a can under the opener, a hand's position) but the thing itself fills the frame. Then: "Each of these parts is marked where it sits with a small white circle containing a bold black number: 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the parts-list order. Then STYLE.
 
+Part descriptions inside both prompts: image models default to the familiar whole object, so for any part that is ONE half of a symmetrical pair (a scissor half, a plier arm, a tong arm, a clamshell half) describe it alone and say what it excludes: "ONE blade with ONE finger ring — a single half, not a complete pair of scissors". For parts that occur several times (4 wheels, 8 bolts) say the count once ("the four wheels as one group").
+
 "image_prompt" (90–170 words), the exploded view; it must match your parts list. In this order:
 1. The thing by name, real appearance and proportions, two sentences.
 2. The view: for an "object", "exploded view: the parts separated along one axis in their real order, real relative sizes, small gaps, thin grey leader lines"; for a "diagram", a clear cutaway or scene; for a "process", a left-to-right sequence of stages.
@@ -241,6 +243,43 @@ async function paint(prompt, signal) {
   }, signal, 'OpenRouter');
 }
 
+// ---------- a look at the finished picture ----------
+const REVIEW_MODEL = 'anthropic/claude-haiku-5.5';
+const REVIEW_SCHEMA = { type: 'json_schema', json_schema: { name: 'review', strict: true, schema: { type: 'object', additionalProperties: false,
+  required: ['ok', 'problems'], properties: { ok: { type: 'boolean' }, problems: { type: 'array', items: { type: 'string' } } } } } };
+
+// Does each numbered badge sit on the part the list says, drawn as described, nothing duplicated or missing?
+async function reviewPicture(dataUrl, plan, signal, mode) {
+  try {
+    const list = plan.parts.map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ');
+    const text = await callAI({ model: REVIEW_MODEL, maxTokens: 400, responseFormat: REVIEW_SCHEMA, signal, messages: [
+      { role: 'system', content: 'You check illustrations for a children\'s "how it works" book. Be strict, concrete and brief. Answer as JSON only.' },
+      { role: 'user', content: [
+        { type: 'text', text: `This should be ${mode === 'whole' ? 'the assembled' : 'an exploded view of the'} ${plan.title_en || plan.wikipedia_title || plan.title}, with numbered badges meaning: ${list}.
+Check: (a) every number 1–${plan.parts.length} appears exactly once and sits on or points to the right part; (b) each part is drawn as what it is — in particular a part that is ONE half of a pair must not be drawn as the complete object (e.g. a scissor half with two finger rings); (c) no stray text or letters. "ok" true only if all pass. "problems": up to 3 one-sentence fixes for the painter, naming the number and what to change.` },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ] },
+    ] });
+    const j = parseJSON(text);
+    return { ok: !!j.ok, problems: (j.problems || []).slice(0, 3) };
+  } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
+}
+
+// Paint, look, and repaint once if the look found problems.
+async function paintChecked(prompt, plan, signal, mode) {
+  let img = await paint(prompt, signal);
+  const r = await reviewPicture(img, plan, signal, mode);
+  if (r && !r.ok && r.problems.length) {
+    setLoading(null, `Fixing the picture: ${r.problems[0].slice(0, 70)}…`);
+    try {
+      const again = await paint(`${prompt}\n\nCorrections to the previous attempt, which must be fixed: ${r.problems.join(' ')}`, signal);
+      const r2 = await reviewPicture(again, plan, signal, mode);
+      if (!r2 || r2.ok || r2.problems.length <= r.problems.length) img = again;
+    } catch (e) { if (e?.name === 'AbortError') throw e; }
+  }
+  return img;
+}
+
 // ---------- the flow ----------
 const LOADING_LINES = ['Working out which part does what', 'Deciding what to pull apart', 'Mixing the paints', 'Painting the exploded view', 'Numbering the parts', 'Looking for a photo of the real thing', 'Finding a 3D model to spin'];
 let loadingTimer = null;
@@ -288,8 +327,8 @@ async function ask(q, { force = false, reusePlan = null } = {}) {
     const result = { ...plan, image: null, image_whole: null, image_id: null, lang, cost: 0 };
     if (plan.kind !== 'refused') {
       setLoading(null, 'Painting the whole thing (20–40 s)');
-      const wholeP = plan.whole_prompt ? paint(plan.whole_prompt, ctrl.signal).catch(() => null) : Promise.resolve(null);
-      const explodedP = paint(plan.image_prompt, ctrl.signal);
+      const wholeP = plan.whole_prompt ? paintChecked(plan.whole_prompt, plan, ctrl.signal, 'whole').catch((e) => { if (e?.name === 'AbortError') throw e; return null; }) : Promise.resolve(null);
+      const explodedP = paintChecked(plan.image_prompt, plan, ctrl.signal, 'exploded');
       result.image_whole = await wholeP;
       if (ctrl.signal.aborted) return;
       setLoading(null, 'Pulling it apart (20–40 s)');
