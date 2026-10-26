@@ -16,6 +16,10 @@ const IMAGE_MODEL = 'openai/gpt-image-2.5-flare';
 const IMAGE_SIZE = '1536x1024';
 
 const $ = (s, root = document) => root.querySelector(s);
+
+// Sketchfab ids are 32 hex characters; links to models must stay on sketchfab.com (a shared page could carry anything).
+const SK_UID = /^[a-f0-9]{32}$/i;
+const skUrl = (u, uid) => (/^https:\/\/(www\.)?sketchfab\.com\//i.test(u || '') ? u : `https://sketchfab.com/3d-models/${SK_UID.test(uid || '') ? uid : ''}`);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
 const state = { key: null, result: null, query: null, abort: null, cost: 0, model3d: null, shortId: undefined, admin: null, gallery: [] };
@@ -569,15 +573,17 @@ async function load3D(terms, known) {
       models = (results || []).filter((m) => m.uid && m.isAgeRestricted !== true).map((m, i) => ({ m, i, s: score(m) })).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, 8).map(({ m }) => m);
     }
     if (known?.uid) models = [known, ...models.filter((m) => m.uid !== known.uid)];
+    // a stored page can carry any text in uid/url: only a real Sketchfab id and a sketchfab.com link are used
+    if (known?.uid && !SK_UID.test(known.uid)) known = null;
     if (!models.length) throw new Error();
     box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><div class="thumbs"></div>';
     const iframe = $('iframe', box); const thumbs = $('.thumbs', box);
     const pick = (m, btn) => {
-      state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: m.viewerUrl || m.url || '', thumb: thumbOf(m) };
+      state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: skUrl(m.viewerUrl || m.url, m.uid), thumb: thumbOf(m) };
       iframe.src = `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
       $$('button', thumbs).forEach((b) => b.classList.toggle('active', b === btn));
       $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(state.model3d.by || 'a Sketchfab artist')} on Sketchfab, under its own licence. Drag to spin, pinch or scroll to zoom.`;
-      const a = $('#model3d-credit a'); a.href = state.model3d.url || `https://sketchfab.com/3d-models/${m.uid}`; a.textContent = m.name;
+      const a = $('#model3d-credit a'); a.href = state.model3d.url; a.textContent = m.name;
     };
     models.forEach((m, i) => {
       const b = document.createElement('button'); b.type = 'button';
@@ -593,7 +599,7 @@ async function load3D(terms, known) {
       box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div>';
       $('iframe', box).src = `https://sketchfab.com/models/${known.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
       $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(known.by || 'a Sketchfab artist')} on Sketchfab, under its own licence.`;
-      const a = $('#model3d-credit a'); a.href = known.url || `https://sketchfab.com/3d-models/${known.uid}`; a.textContent = known.name || '3D model';
+      const a = $('#model3d-credit a'); a.href = skUrl(known.url, known.uid); a.textContent = known.name || '3D model';
       return;
     }
     box.innerHTML = `<p class="empty">Couldn't load a 3D model here. <a href="${searchLink}" target="_blank" rel="noopener">Browse models on Sketchfab</a></p>`;
@@ -671,7 +677,7 @@ async function buildReport() {
   const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
   const sk = `https://sketchfab.com/search?q=${encodeURIComponent(r.search_terms || state.query || '')}&type=models`;
   const m = state.model3d;
-  const model = m?.uid ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(m.url || 'https://sketchfab.com/3d-models/' + m.uid)}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection).</p>` : '';
+  const model = m?.uid && SK_UID.test(m.uid) ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(skUrl(m.url, m.uid))}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection).</p>` : '';
   return `<!doctype html><html lang="${langCode(r.lang)}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(r.title)} — How</title>
 <style>

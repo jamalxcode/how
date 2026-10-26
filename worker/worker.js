@@ -13,7 +13,42 @@
 // Bindings: KV namespace as LINKS. Optional secret ADMIN_SECRET (for the gallery).
 
 const ALLOWED = ['https://how.sala.company', 'https://jamalxcode.github.io', 'http://localhost:8765', 'http://127.0.0.1:8765'];
-const MAX_BYTES = 6 * 1024 * 1024; // answers carry a picture (~300–900 KB as base64)
+const MAX_BYTES = 3 * 1024 * 1024; // answers carry a picture (~300–900 KB as base64)
+// Only the site may store pages, and not too many: new pages per address per 10 minutes (per Cloudflare location).
+const POST_LIMIT = 12;
+const hits = new Map();
+function tooMany(ip) {
+  const now = Date.now();
+  const recent = (hits.get(ip) || []).filter((t) => now - t < 600000);
+  recent.push(now);
+  hits.set(ip, recent);
+  if (hits.size > 5000) hits.clear();
+  return recent.length > POST_LIMIT;
+}
+// What a stored page may hold, and how long each text may be. Anything else is dropped.
+const STR = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+const LIST = (v, n, f) => (Array.isArray(v) ? v.slice(0, n).map(f).filter(Boolean) : undefined);
+function cleanAnswer(d) {
+  const out = {
+    title: STR(d.title, 120), hook: STR(d.hook, 400), kind: STR(d.kind, 40), lang: STR(d.lang, 40), q: STR(d.q, 120),
+    wikipedia_title: STR(d.wikipedia_title, 120), search_terms: STR(d.search_terms, 120), fun_fact: STR(d.fun_fact, 600),
+    image_prompt: STR(d.image_prompt, 2000), whole_prompt: STR(d.whole_prompt, 2000),
+    parts: LIST(d.parts, 20, (p) => (p && typeof p === 'object' ? { name: STR(p.name, 80) || '', role: STR(p.role, 300) || '' } : null)),
+    steps: LIST(d.steps, 20, (p) => (p && typeof p === 'object' ? { title: STR(p.title, 80) || '', text: STR(p.text, 600) || '' } : null)),
+    badges: LIST(d.badges, 8, (b) => STR(b, 40)),
+    image_id: /^[a-z0-9]{5,12}$/.test(d.image_id || '') ? d.image_id : undefined,
+  };
+  const m = d.m3d;
+  if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
+    out.m3d = { uid: m.uid, name: STR(m.name, 120), by: STR(m.by, 80), url: /^https:\/\/(www\.)?sketchfab\.com\//i.test(m.url || '') ? m.url.slice(0, 300) : undefined };
+  }
+  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
+  return out;
+}
+// Decoded picture bytes must start like a JPEG, PNG or WebP file.
+const looksLikeImage = (b) => b && b.length > 12 && (
+  (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) ||
+  (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45));
 const GALLERY_MAX = 60;
 const ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789'; // no look-alikes
 const UA = 'HowSalaCompany/1.0 (https://how.sala.company)';
@@ -26,8 +61,14 @@ function id(n = 7) {
   const b = crypto.getRandomValues(new Uint8Array(n));
   return [...b].map((x) => ALPHABET[x % ALPHABET.length]).join('');
 }
-const json = (data, status, headers) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', ...headers } });
-const isAdmin = (req, env) => !!env.ADMIN_SECRET && req.headers.get('X-Admin') === env.ADMIN_SECRET;
+const json = (data, status, headers) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff', ...headers } });
+const isAdmin = (req, env) => {
+  const given = req.headers.get('X-Admin') || '', want = env.ADMIN_SECRET || '';
+  if (!want || given.length !== want.length) return false;
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= given.charCodeAt(i) ^ want.charCodeAt(i);
+  return diff === 0;
+};
 
 // Wikipedia: pick the pictures that show the thing, not flags, maps and icons.
 const BAD_IMAGE = /icon|logo|commons-|wiki|edit-|question_book|symbol|flag_of|ambox|disambig|padlock|speaker|sound-|nuvola|crystal_clear|\.ogv|\.webm|\.ogg|\.mid|locator|coat_of_arms|seal_of|emblem|_map|map_of|chart|graph_|plot/i;
@@ -152,7 +193,7 @@ export default {
       const pid = path.split('/')[2]; const whole = path.endsWith('/whole');
       const img = await env.LINKS.get(whole ? `imgw:${pid}` : `img:${pid}`, { type: 'arrayBuffer' });
       if (!img) return json({ error: 'not found' }, 404, h);
-      return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
+      return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
 
     const key = path.slice(1);
@@ -163,6 +204,9 @@ export default {
     }
 
     if (req.method === 'POST' && key === '') {
+      if (!ALLOWED.includes(req.headers.get('Origin') || '')) return json({ error: 'not for this site' }, 403, h);
+      const ip = req.headers.get('CF-Connecting-IP') || '';
+      if (ip && tooMany(ip)) return json({ error: 'too many pages from your address, try again in a few minutes' }, 429, h);
       const len = Number(req.headers.get('Content-Length') || 0);
       if (len > MAX_BYTES) return json({ error: 'too large' }, 413, h);
       const text = await req.text();
@@ -173,11 +217,12 @@ export default {
       // the picture: either new bytes (data URL) or a reference to one already stored (image_id)
       const decode = (v) => { const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(v || ''); return m ? Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)) : null; };
       let imgBytes = decode(data.image), wholeBytes = decode(data.image_whole);
+      if ((imgBytes && !looksLikeImage(imgBytes)) || (wholeBytes && !looksLikeImage(wholeBytes))) return json({ error: 'not a picture' }, 400, h);
       if (!imgBytes && data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) {
         imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' });
         if (!wholeBytes) wholeBytes = await env.LINKS.get(`imgw:${data.image_id}`, { type: 'arrayBuffer' });
       }
-      delete data.image; delete data.image_whole;
+      data = cleanAnswer(data);
       data.has_whole = !!wholeBytes;
       // same answer (+ same picture) → same id, so re-sharing never fills the store
       const body = JSON.stringify(data);
