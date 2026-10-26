@@ -50,7 +50,8 @@ Question + language + audience
 | `app.js` | sign-in and keys, the prompt and schema, painting, storing, sharing, gallery, Wikipedia and Sketchfab |
 | `demo.js`, `demo-scissors.jpg` | the built-in demo page |
 | `worker/worker.js` | the link service: stores pages and pictures, short links, gallery, flags, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
-| `logo.svg` | gear-with-a-question-mark badge, also the favicon |
+| `logo.svg`, `favicon-48.png`, `apple-touch-icon.png` | gear-with-a-question-mark badge, also the favicon and home-screen icon |
+| `og-image.jpg`, `robots.txt`, `sitemap.xml` | link preview picture and search-engine files |
 
 ## Privacy
 
@@ -59,7 +60,7 @@ Question + language + audience
 | Your question and language | Through OpenRouter to Claude and to OpenAI's image model when you press *Show me*; to Wikipedia and Sketchfab to find photos and models |
 | The page you get | Stored by the link service so it can be shared and reopened; it holds no name or account |
 | OpenRouter sign-in | Your browser, until you sign out |
-| Analytics | Page views only (GoatCounter, no cookies) |
+| Analytics | Page views, and which answers get opened, counted by GoatCounter (no cookies, nothing personal) |
 
 ## Licence
 

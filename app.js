@@ -316,6 +316,17 @@ function startLoading(q) {
   $('#loading').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 function stopLoading() { clearInterval(loadingTimer); $('#loading').hidden = true; }
+// GoatCounter already counts the page view; each answer that opens is also logged as an event
+// ("answer/<title>", with how it was opened as the referrer: made, reopened or shared), so the
+// dashboard shows which things people ask about. count.js loads async, so wait for it a little.
+function countAnswer(title, how) {
+  let tries = 0;
+  (function send() {
+    const gc = window.goatcounter;
+    if (gc && typeof gc.count === 'function') { try { gc.count({ path: `${location.host}/answer/${String(title).slice(0, 80)}`, title, referrer: how, event: true }); } catch {} return; }
+    if (++tries < 20) setTimeout(send, 500);
+  })();
+}
 function showError(msg) { stopLoading(); $('#error-msg').textContent = msg; $('#error').hidden = false; }
 
 async function ask(q, { force = false, reusePlan = null } = {}) {
@@ -382,6 +393,8 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   const r = $('#result');
   r.hidden = false;
   document.body.classList.add('has-result');
+  document.title = `${result.title || q} · How does it work?`;
+  countAnswer(result.title || q, shared ? 'shared' : free ? 'reopened' : 'made');
   r.setAttribute('dir', RTL.test(result.lang || '') ? 'rtl' : 'ltr');
   r.setAttribute('lang', langCode(result.lang));
   if (r.getAttribute('dir') === 'rtl') loadArabicFont();

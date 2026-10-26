@@ -3,18 +3,84 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>How · How does it work?</title>
-  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: an exploded view with numbered parts, real photos and a 3D model, in your language.">
+  <title>How does it work? See anything pulled apart, with numbered parts | How</title>
+
+  <!-- SEO -->
+  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: one exploded view with numbered parts, a few short steps, real photos and a 3D model, in 17 languages. Free to browse, in your browser.">
+  <meta name="author" content="Sala Company">
+  <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#fbf4e4">
+  <link rel="canonical" href="https://how.sala.company/">
+
+  <!-- Icons -->
   <link rel="icon" href="logo.svg" type="image/svg+xml">
-  <meta property="og:title" content="How · How does it work?">
-  <meta property="og:description" content="Type a thing. See how it works — animated, pulled apart, in your language.">
+  <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+
+  <!-- Open Graph (link previews) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="How · Sala Company">
+  <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://how.sala.company/">
-  
+  <meta property="og:title" content="How does it work? See anything pulled apart">
+  <meta property="og:description" content="Type a thing. See it pulled apart and numbered, the real thing in photos and 3D, in your language. Almost no reading.">
+  <meta property="og:image" content="https://how.sala.company/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="A pair of scissors drawn with numbered parts, under the words How does it work?">
+
+  <!-- Twitter / X card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="How does it work? See anything pulled apart">
+  <meta name="twitter:description" content="Type a thing. See it pulled apart and numbered, the real thing in photos and 3D, in your language.">
+  <meta name="twitter:image" content="https://how.sala.company/og-image.jpg">
+
+  <!-- Structured data: the app, its site and the company (same shape as go.sala.company) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://how.sala.company/#website",
+        "name": "How",
+        "alternateName": "How does it work?",
+        "url": "https://how.sala.company/",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://go.sala.company/#org" }
+      },
+      {
+        "@type": "WebApplication",
+        "@id": "https://how.sala.company/#app",
+        "name": "How: see how anything works, pulled apart",
+        "url": "https://how.sala.company/",
+        "image": "https://how.sala.company/og-image.jpg",
+        "description": "Type a thing — a combustion engine, scissors, a can opener, how a house is built — and get one exploded view with numbered parts, a few short steps, a fun fact, photos of the real thing and a 3D model to spin, in 17 languages including Arabic. Shared answers and the gallery open free with no sign-in; making a new page uses your own OpenRouter account for the AI.",
+        "applicationCategory": "EducationalApplication",
+        "operatingSystem": "Any (web browser)",
+        "browserRequirements": "Requires JavaScript",
+        "inLanguage": ["en", "ar", "fr", "es", "de", "pt", "it", "tr", "ru", "hi", "ur", "fa", "zh", "ja", "ko", "id", "sw"],
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@id": "https://go.sala.company/#org" },
+        "isPartOf": { "@id": "https://go.sala.company/#website" }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://go.sala.company/#org",
+        "name": "Sala Company",
+        "url": "https://go.sala.company/",
+        "logo": "https://go.sala.company/apple-touch-icon.png",
+        "sameAs": ["https://github.com/jamalxcode", "https://mutawa.substack.com"]
+      }
+    ]
+  }
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=24">
+  <link rel="stylesheet" href="style.css?v=25">
 </head>
 <body>
 
@@ -193,6 +259,11 @@
 </main>
 
 <footer class="foot">
+  <details class="about" id="about">
+    <summary>What is How?</summary>
+    <p>How is a picture book that draws itself. Ask how a thing works — a combustion engine, scissors, a can opener, a zipper, a refrigerator, bicycle gears, why planes fly, how a house is built — and you get one exploded view with the parts numbered, a few short steps, a fun fact, photos of the real thing from Wikipedia and a 3D model from Sketchfab to spin. It explains in 17 languages, including Arabic, Urdu and Persian laid out right to left, and for three audiences: a curious adult, a 10-year-old or an engineering student.</p>
+    <p>It is in the spirit of the old <em>Tell Me Why</em> books: almost no reading, one big picture. The words are written by Claude and the picture is painted by OpenAI's image model, both paid for through your own OpenRouter account (a few cents a page). Every answer in the gallery, and every answer someone shares with you, opens free with no sign-in. Made by <a href="https://go.sala.company">Sala Company</a> in Kuwait; the <a href="https://github.com/jamalxcode/how">source is open</a>.</p>
+  </details>
   <p>How is a free, static page: your OpenRouter account pays the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
     <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
 </footer>
@@ -236,7 +307,7 @@
 </dialog>
 
 <script src="demo.js?v=20"></script>
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

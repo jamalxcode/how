@@ -233,6 +233,10 @@ body.has-result .hero-sub { display: none; }
 /* ---- footer & dialogs ---- */
 .foot { text-align: center; color: var(--muted); font-size: 13px; padding: 20px 16px 28px; }
 .foot a { color: inherit; }
+.foot .about { max-width: 640px; margin: 0 auto 14px; text-align: left; }
+.foot .about summary { cursor: pointer; text-align: center; color: var(--ink-2); font-weight: 700; }
+.foot .about summary:hover { color: var(--red); }
+.foot .about p { margin: 10px 0 0; line-height: 1.55; }
 .dialog { border: 2px solid var(--ink); border-radius: var(--radius); background: var(--paper); color: var(--ink); padding: 22px; max-width: 520px; width: calc(100% - 32px); }
 .dialog::backdrop { background: rgba(29,36,51,.45); }
 .dialog h3 { font-family: var(--font-display); margin: 0 0 10px; font-size: 22px; }
