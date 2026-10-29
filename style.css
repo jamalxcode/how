@@ -509,3 +509,20 @@ body.has-result .hero-sub { display: none; }
 }
 @media (prefers-color-scheme: dark) { .fbarrow span { color: #fff; } .fbacard header b { color: var(--ink); } }
 @media (prefers-reduced-motion: reduce) { .fbimg.waiting { animation: none; } }
+
+/* point at a zone → its before and after */
+.fplan .fzg { cursor: pointer; }
+.fplan .fzg:hover > rect:first-of-type { stroke-width: 4; filter: drop-shadow(0 0 4px rgba(228,87,46,.5)); }
+.ffloor { position: relative; }
+.ffloor img { display: block; width: 100%; height: auto; }
+.ffloor .hot { position: absolute; width: 6%; aspect-ratio: 1; transform: translate(-50%, -50%); border-radius: 50%; border: 0; background: transparent; cursor: pointer; padding: 0; }
+.ffloor .hot:hover { box-shadow: 0 0 0 4px rgba(228,87,46,.75), 0 0 0 10px rgba(228,87,46,.25); }
+.ztip { position: fixed; z-index: 50; width: min(420px, calc(100vw - 16px)); background: var(--paper); border: 2px solid var(--ink); border-top: 6px solid var(--c); border-radius: 14px; padding: 10px 12px 12px; box-shadow: var(--shadow); pointer-events: none; animation: pop .15s ease-out; }
+.ztip header { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 8px; }
+.ztip header b { font-family: var(--font-display); font-size: 17px; }
+.ztip header small { color: var(--muted); font-size: 12.5px; width: 100%; padding-left: 32px; margin-top: -4px; }
+.ztip .fbarow { grid-template-columns: 1fr 80px 1fr; }
+.ztip-none { margin: 0; color: var(--ink-2); font-size: 14px; }
+.ztip[dir="rtl"] header small { padding-left: 0; padding-right: 32px; }
+.ztip[dir="rtl"] .fbarrow span { transform: scaleX(-1); }
+@media (prefers-reduced-motion: reduce) { .ztip { animation: none; } }

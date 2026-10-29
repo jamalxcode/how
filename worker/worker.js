@@ -40,6 +40,8 @@ function cleanAnswer(d) {
     badges: LIST(d.badges, 8, (b) => STR(b, 40)),
     image_id: /^[a-z0-9]{5,12}$/.test(d.image_id || '') ? d.image_id : undefined,
     factory: cleanFactory(d.factory, Array.isArray(d.parts) ? Math.min(d.parts.length, 20) : 0),
+    // where the painted factory floor's zone numbers are, in % of the picture
+    floor_badges: LIST(d.floor_badges, 12, (b) => (b && Number.isInteger(b.n) && b.n >= 1 && b.n <= 12 && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100 ? { n: b.n, x: Number(b.x), y: Number(b.y) } : null)),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {

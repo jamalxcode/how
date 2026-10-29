@@ -117,11 +117,11 @@ async function makeFactory() {
       { role: 'user', content: `Plan the factory for: ${r.title}` },
     ] });
     r.factory = cleanFactory(f, (r.parts || []).length);
-    r.image_factory = null; r.has_factory_img = false;
+    r.image_factory = null; r.has_factory_img = false; r.floor_badges = undefined;
     r.factory_busy = r.factory?.applicable ? 'all' : null;
     renderFactoryIfShown(r);
     if (r.factory_busy) {
-      const floor = r.factory.floor_prompt ? paint(r.factory.floor_prompt, ctrl.signal).then((img) => { r.image_factory = img; renderFactoryIfShown(r); }) : Promise.resolve();
+      const floor = r.factory.floor_prompt ? paint(r.factory.floor_prompt, ctrl.signal).then(async (img) => { r.image_factory = img; r.floor_badges = await locateBadges(img, r.factory.zones.length, ctrl.signal); renderFactoryIfShown(r); }) : Promise.resolve();
       const [a, b] = await Promise.allSettled([floor, paintStates(r, ctrl.signal)]);
       if ([a, b].some((x) => x.status === 'rejected' && x.reason?.name === 'AbortError')) throw new DOMException('Cancelled', 'AbortError');
       r.factory_error = [a.status === 'rejected' ? `The floor picture failed: ${a.reason?.message}` : '', b.value || (b.status === 'rejected' ? b.reason?.message : '')].filter(Boolean).join(' ');
@@ -140,7 +140,7 @@ async function paintFloor() {
   if (!state.key) { showError('To paint the factory floor, sign in to OpenRouter first (top right).'); return; }
   const ctrl = new AbortController(); r.factory_ctrl = ctrl;
   r.factory_busy = 'paint'; r.factory_error = ''; renderFactoryIfShown(r);
-  try { r.image_factory = await paint(r.factory.floor_prompt, ctrl.signal); }
+  try { r.image_factory = await paint(r.factory.floor_prompt, ctrl.signal); r.floor_badges = await locateBadges(r.image_factory, r.factory.zones.length, ctrl.signal); }
   catch (e) { if (e?.name !== 'AbortError') r.factory_error = e.message; }
   r.factory_busy = null;
   renderFactoryIfShown(r);
@@ -326,11 +326,11 @@ function renderFactory() {
     </div>
 
     <h3 class="list-h">Factory floor</h3>
-    ${floorPic ? `<figure class="ffig"><div class="stage"><img src="${esc(floorPic)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div><figcaption>Painted overview: an impression, not to scale. Numbers are the zones below.</figcaption></figure>`
+    ${floorPic ? `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(floorPic)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>Painted overview: an impression, not to scale. Point at (or tap) a number to see what that zone does.</figcaption></figure>`
       : r.factory_busy === 'paint' || r.factory_busy === 'all' ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Painting the factory floor (20–40 s)</p></div></div>`
       : f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : ''}
     ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
-    ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>Floor plan drawn to scale from the zone sizes. Material flows along the arrows, from IN to OUT; letters are machines, listed below.<span class="fswipe"> Swipe sideways to see all of it.</span></figcaption></figure>` : ''}
+    ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>Floor plan drawn to scale from the zone sizes. Material flows along the arrows, from IN to OUT; letters are machines, listed below. Point at (or tap) a zone to see its before and after.<span class="fswipe"> Swipe sideways to see all of it.</span></figcaption></figure>` : ''}
     <div class="ftable-wrap"><table class="ftable">
       <thead><tr><th>#</th><th>Zone</th><th>Size</th><th>Machines (footprint each)</th><th>Staff</th></tr></thead>
       <tbody>${f.zones.map((z, i) => { const st = stageOf(z.stage); return `<tr style="--c:${st.color};--t:${st.tint}">
@@ -370,6 +370,8 @@ function renderFactory() {
   $$('.pdot', box).forEach((b) => b.addEventListener('click', () => { setView('exploded'); setTimeout(() => pingPart(Number(b.dataset.part)), 60); }));
   $('#factory-paint')?.addEventListener('click', paintFloor);
   $('#factory-states')?.addEventListener('click', makeStates);
+  $$('.fplan [data-zone]', box).forEach((g) => hoverZone(g, r, Number(g.dataset.zone)));
+  floorHotspots(r, floorPic);
 }
 
 // The seven stations without numbers: on the intro, and (with a moving belt) while the plan is made.
@@ -396,6 +398,71 @@ function statesHTML(r, f) {
       <div class="fbarow">${pic(st, i, 'before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic(st, i, 'after')}</div>
     </article>`;
   }).join('')}</div>`;
+}
+
+// ---------- point at a zone (plan or painted floor) → its before and after ----------
+function hoverZone(el, r, n) {
+  el.addEventListener('mouseenter', (e) => showZoneTip(e, r, n));
+  el.addEventListener('mousemove', moveZoneTip);
+  el.addEventListener('mouseleave', hideZoneTip);
+  el.addEventListener('click', (e) => { e.stopPropagation(); showZoneTip(e, r, n); clearTimeout(zoneTipTimer); zoneTipTimer = setTimeout(hideZoneTip, 4000); });
+}
+let zoneTipTimer = null;
+function zoneTip() {
+  let t = $('#ztip');
+  if (!t) {
+    t = document.createElement('div'); t.id = 'ztip'; t.className = 'ztip'; t.hidden = true; t.setAttribute('role', 'tooltip');
+    document.body.appendChild(t);
+    document.addEventListener('click', hideZoneTip);
+  }
+  return t;
+}
+function showZoneTip(e, r, n) {
+  const f = r.factory; const z = f?.zones?.[n - 1]; if (!z) return;
+  const esc = escapeHTML; const sg = stageOf(z.stage); const st = f.states?.[n - 1];
+  const pic = (which) => {
+    const url = st && stateUrl(r, stateKey(st, n - 1, which));
+    return `<figure><div class="fbimg">${url ? `<img src="${esc(url)}" alt="">` : '<span>—</span>'}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
+  };
+  const t = zoneTip();
+  t.style.setProperty('--c', sg.color); t.style.setProperty('--t', sg.tint);
+  t.setAttribute('dir', $('#result').getAttribute('dir') || 'ltr');
+  t.innerHTML = `<header><span class="znum">${n}</span><b>${esc(z.name)}</b><small>${fmtM(z.length_m)} × ${fmtM(z.width_m)} m · ${z.staff} staff</small></header>
+    ${st ? `<div class="fbarow">${pic('before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic('after')}</div>`
+      : `<p class="ztip-none">${r.factory_busy ? 'The before and after pictures are on their way.' : 'No before and after pictures for this plan yet: use the button under the zone list.'}</p>`}`;
+  t.hidden = false; moveZoneTip(e);
+}
+function moveZoneTip(e) {
+  const t = $('#ztip'); if (!t || t.hidden) return;
+  const pad = 16; const w = t.offsetWidth, h = t.offsetHeight;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + w > window.innerWidth - 8) x = Math.max(8, e.clientX - w - pad);
+  if (y + h > window.innerHeight - 8) y = Math.max(8, e.clientY - h - pad);
+  t.style.left = `${x}px`; t.style.top = `${y}px`;
+}
+function hideZoneTip() { const t = $('#ztip'); if (t) t.hidden = true; }
+
+// The painted floor's number badges: where they are is asked of the vision model once per page
+// (like the exploded view's), then each becomes a spot that shows its zone.
+function floorHotspots(r, url) {
+  const box = $('#ffloor'); if (!box || !url) return;
+  const n = r.factory.zones.length;
+  const spots = r.floor_badges || [];
+  for (const b of spots) {
+    const hot = document.createElement('button'); hot.type = 'button'; hot.className = 'hot';
+    hot.style.left = `${b.x}%`; hot.style.top = `${b.y}%`; hot.setAttribute('aria-label', r.factory.zones[b.n - 1]?.name || `zone ${b.n}`);
+    hoverZone(hot, r, b.n);
+    box.appendChild(hot);
+  }
+  if (!spots.length && state.key && !r.factory_busy && !r._locatingFloor) {
+    r._locatingFloor = true;
+    locateBadges(url, n, undefined).then((found) => {
+      if (!found.length) return;
+      r.floor_badges = found;
+      if (state.result === r && $('#ffloor')) floorHotspots(r, url);
+      cacheFactory(r);
+    });
+  }
 }
 
 function loaderSVG() {
@@ -458,7 +525,7 @@ function floorPlanSVG(f, lay) {
   zones.forEach((z, i) => {
     const b = lay.boxes[i]; const st = stageOf(z.stage);
     const x = X(b.x), y = Y(b.y), w = b.w * s, h = b.h * s;
-    out.push(`<g><title>${esc(`${i + 1}. ${z.name}: ${fmtM(z.length_m)} × ${fmtM(z.width_m)} m, ${fmtArea(z.length_m * z.width_m)} m², ${z.staff} staff`)}</title>`);
+    out.push(`<g class="fzg" data-zone="${i + 1}">`);
     out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${st.tint}" stroke="${st.color}" stroke-width="2"/>`);
     // machines, packed in shelves under the label band
     const top = y + 38, left = x + 6, right = x + w - 6, bottom = y + h - 6, sp = Math.max(4, 0.6 * s);
@@ -469,7 +536,7 @@ function floorPlanSVG(f, lay) {
         if (mw > right - left && mh <= right - left) [mw, mh] = [mh, mw];
         if (cx + mw > right) { cx = left; cy += rowH + sp; rowH = 0; }
         if (cx + mw > right || cy + mh > bottom || mw < 3 || mh < 3) continue;
-        out.push(`<rect x="${cx}" y="${cy}" width="${mw}" height="${mh}" rx="1.5" fill="#fffdf7" stroke="${st.color}" stroke-width="1.2"><title>${esc(`${String.fromCharCode(65 + k)}: ${m.name}, ${fmtM(m.length_m)} × ${fmtM(m.width_m)} m`)}</title></rect>`);
+        out.push(`<rect x="${cx}" y="${cy}" width="${mw}" height="${mh}" rx="1.5" fill="#fffdf7" stroke="${st.color}" stroke-width="1.2"/>`);
         if (mw >= 11 && mh >= 11) out.push(`<text x="${cx + mw / 2}" y="${cy + mh / 2 + 3.5}" text-anchor="middle" font-size="${Math.min(10, mh - 2)}" font-weight="800" fill="${st.color}">${String.fromCharCode(65 + k)}</text>`);
         cx += mw + sp; rowH = Math.max(rowH, mh);
       }
