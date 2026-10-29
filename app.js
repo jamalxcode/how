@@ -412,6 +412,8 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
 
   $('#tab-whole').hidden = !wholeUrl(result);
   $('#tab-factory').hidden = result.kind === 'refused';
+  $('#tab-money').hidden = result.kind === 'refused';
+  if (result.financials) result.financials = cleanMoney(result.financials);
   $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = '🏭 Factory';
   if (result.factory) result.factory = cleanFactory(result.factory, (result.parts || []).length);
   // other versions of the factory: their pictures are stored under their own name unless said otherwise
@@ -530,6 +532,8 @@ function setView(view) {
   $('#view-model3d').hidden = view !== 'model3d';
   $('#view-factory').hidden = view !== 'factory';
   if (view === 'factory') renderFactory();
+  $('#view-money').hidden = view !== 'money';
+  if (view === 'money') renderMoney();
 }
 
 // ---------- photos of the real thing (Wikipedia) ----------
@@ -649,10 +653,11 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories, financials } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
   return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined, state_images: state_imgs && Object.keys(state_imgs).length ? state_imgs : undefined, state_keys: state_keys?.length ? state_keys : undefined, floor_badges: floor_badges?.length ? floor_badges : undefined,
+    financials: financials || undefined,
     factory_mode: factory ? factory_mode || 'mixed' : undefined, factory_where: factory_where || undefined,
     factories: factories && Object.keys(factories).length ? Object.fromEntries(Object.entries(factories).map(([m, v]) => [m, { factory: v.factory, image_factory: v.image_factory || undefined, has_factory_img: v.has_factory_img || undefined, state_images: v.state_imgs && Object.keys(v.state_imgs).length ? v.state_imgs : undefined, state_keys: v.state_keys, floor_badges: v.floor_badges, where: v.factory_where ?? m }])) : undefined };
 }

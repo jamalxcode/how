@@ -80,7 +80,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=33">
 </head>
 <body>
 
@@ -226,6 +226,7 @@
       <button role="tab" class="tab" data-view="photos" aria-selected="false">📷 Real thing</button>
       <button role="tab" class="tab" data-view="model3d" aria-selected="false">🧊 3D</button>
       <button role="tab" class="tab" data-view="factory" aria-selected="false" id="tab-factory">🏭 Factory</button>
+      <button role="tab" class="tab" data-view="money" aria-selected="false" id="tab-money">💰 Money</button>
     </nav>
 
     <div class="view" id="view-picture">
@@ -249,6 +250,10 @@
 
     <div class="view" id="view-factory" hidden>
       <div class="factory" id="factory"></div>
+    </div>
+
+    <div class="view" id="view-money" hidden>
+      <div class="factory money" id="money"></div>
     </div>
 
     <footer class="result-foot">
@@ -311,9 +316,10 @@
   </form>
 </dialog>
 
-<script src="demo.js?v=22"></script>
-<script src="factory.js?v=9"></script>
-<script src="app.js?v=34"></script>
+<script src="demo.js?v=23"></script>
+<script src="factory.js?v=10"></script>
+<script src="money.js?v=1"></script>
+<script src="app.js?v=35"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

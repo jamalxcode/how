@@ -44,6 +44,7 @@ function cleanAnswer(d) {
     factory: cleanFactory(d.factory, Array.isArray(d.parts) ? Math.min(d.parts.length, 20) : 0),
     // where the painted factory floor's zone numbers are, in % of the picture
     floor_badges: cleanBadges(d.floor_badges),
+    financials: cleanFinancials(d.financials),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
@@ -83,6 +84,25 @@ function cleanFactory(f, nParts) {
 }
 const STATE_KEY = /^z\d{1,2}[ab]$/;
 const MODES = ['manual', 'mixed', 'auto'];
+// The Money tab's inputs (see money.js, which trims them the same way and does all the sums).
+function cleanFinancials(m) {
+  if (!m || typeof m !== 'object') return undefined;
+  const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const n = (v, hi = 1e10) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(0, x)) : 0; };
+  const list = (v, max, fn) => (Array.isArray(v) ? v.slice(0, max).filter((x) => x && typeof x === 'object').map(fn) : []);
+  return {
+    region: s(m.region, 80), unit_label: s(m.unit_label, 30) || 'units', assumptions: (Array.isArray(m.assumptions) ? m.assumptions : []).slice(0, 6).map((a) => s(a, 160)).filter(Boolean),
+    price_reference: { low: n(m.price_reference?.low, 1e7), high: n(m.price_reference?.high, 1e7), note: s(m.price_reference?.note, 160) },
+    setups: list(m.setups, 3, (u) => ({
+      mode: MODES.includes(u.mode) ? u.mode : 'mixed', output_per_month: n(u.output_per_month), land_m2: n(u.land_m2), building_m2: n(u.building_m2),
+      staff: list(u.staff, 12, (x) => ({ role: s(x.role, 60), count: Math.round(n(x.count, 5000)), monthly_salary: n(x.monthly_salary, 1e6) })),
+      capex: list(u.capex, 16, (x) => ({ item: s(x.item, 80), amount: n(x.amount) })),
+      power: { installed_kw: n(u.power?.installed_kw, 1e6), kwh_per_month: n(u.power?.kwh_per_month), price_per_kwh: n(u.power?.price_per_kwh, 10) },
+      opex: list(u.opex, 12, (x) => ({ item: s(x.item, 80), monthly: n(x.monthly) })),
+      material_per_unit: n(u.material_per_unit, 1e7),
+    })),
+  };
+}
 const cleanBadges = (v) => LIST(v, 12, (b) => (b && Number.isInteger(b.n) && b.n >= 1 && b.n <= 12 && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100 ? { n: b.n, x: Number(b.x), y: Number(b.y) } : null));
 // Decoded picture bytes must start like a JPEG, PNG or WebP file.
 const looksLikeImage = (b) => b && b.length > 12 && (
@@ -340,7 +360,7 @@ export default {
         for (const [sk, b] of Object.entries(variants[m].pics)) await env.LINKS.put(`imgs:${k}:${m}:${sk}`, b);
       }
       // "factory", "states" and "variants" tell the page what this service kept (an older one drops them silently)
-      return json({ id: k, factory: !!data.factory, states: stateKeys.length,
+      return json({ id: k, factory: !!data.factory, financials: !!data.financials, states: stateKeys.length,
         variants: Object.fromEntries(vNames.map((m) => [m, { floor: !!variants[m].floor, states: Object.keys(variants[m].pics).length }])) }, 200, h);
     }
 

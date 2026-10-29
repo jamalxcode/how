@@ -21,13 +21,36 @@ const DEMO = {
       { title: 'Shear', text: 'The two edges slide past each other, pinching the paper from both sides until it splits.' },
       { title: 'Moving cut', text: 'The crossing point travels along the blades, so the cut runs forward as you close them.' },
     ],
+    // the Money tab: approximate inputs for the three setups (money.js does the sums)
+    financials: {
+      region: 'Gulf (Kuwait, UAE, Saudi Arabia)', unit_label: 'pairs',
+      assumptions: ['26 working days a month, 2 shifts of 8 hours', 'Industrial power at about $0.03 per kWh (subsidised Gulf tariff)', 'Mostly expatriate workers, with housing, visas and transport paid by the factory', 'Building leased and fitted out; land not bought', 'Same output for all three: about 12,000 pairs a day'],
+      price_reference: { low: 1.2, high: 2.5, note: 'plain stainless household scissors, sold by the carton to wholesalers' },
+      setups: [
+        { mode: 'manual', output_per_month: 312000, land_m2: 6000, building_m2: 4000, material_per_unit: 0.42,
+          staff: [{ role: 'Production workers', count: 180, monthly_salary: 450 }, { role: 'Supervisors', count: 10, monthly_salary: 1500 }, { role: 'Quality inspectors', count: 12, monthly_salary: 700 }, { role: 'Maintenance fitters', count: 4, monthly_salary: 900 }, { role: 'Store and dispatch', count: 10, monthly_salary: 500 }, { role: 'Management and office', count: 6, monthly_salary: 3000 }],
+          capex: [{ item: 'Fit-out of a leased building', amount: 600000 }, { item: 'Presses and furnaces (used, manual feed)', amount: 900000 }, { item: 'Bench grinders and polishers', amount: 300000 }, { item: 'Small injection moulders', amount: 400000 }, { item: 'Hand tools, jigs and fixtures', amount: 150000 }, { item: 'Hand-operated packing tables and sealers', amount: 60000 }, { item: 'Forklifts and racking', amount: 80000 }],
+          power: { installed_kw: 900, kwh_per_month: 180000, price_per_kwh: 0.03 },
+          opex: [{ item: 'Building lease', monthly: 6000 }, { item: 'Maintenance and spares', monthly: 8000 }, { item: 'Consumables (belts, oil, wheels)', monthly: 15000 }, { item: 'Insurance', monthly: 3000 }, { item: 'Water and other utilities', monthly: 2000 }, { item: 'Outbound transport', monthly: 12000 }, { item: 'Worker housing, visas and buses', monthly: 30000 }] },
+        { mode: 'mixed', output_per_month: 312000, land_m2: 5000, building_m2: 3400, material_per_unit: 0.42,
+          staff: [{ role: 'Machine operators', count: 24, monthly_salary: 700 }, { role: 'Assembly workers', count: 16, monthly_salary: 450 }, { role: 'Quality inspectors', count: 6, monthly_salary: 700 }, { role: 'Maintenance technicians', count: 4, monthly_salary: 1300 }, { role: 'Shift supervisors', count: 4, monthly_salary: 1800 }, { role: 'Management and office', count: 5, monthly_salary: 3000 }],
+          capex: [{ item: 'Fit-out of a leased building', amount: 700000 }, { item: 'Progressive presses and coil feeders', amount: 900000 }, { item: 'Mesh-belt hardening furnace and oven', amount: 650000 }, { item: 'CNC blade grinders', amount: 720000 }, { item: 'Loading robots', amount: 180000 }, { item: 'Injection moulders and moulds', amount: 480000 }, { item: 'Assembly fixtures and torque drivers', amount: 60000 }, { item: 'Vision inspection', amount: 80000 }, { item: 'Blister and case packing', amount: 350000 }, { item: 'Forklifts and racking', amount: 150000 }, { item: 'Installation and commissioning', amount: 250000 }],
+          power: { installed_kw: 1400, kwh_per_month: 320000, price_per_kwh: 0.03 },
+          opex: [{ item: 'Building lease', monthly: 5000 }, { item: 'Maintenance and spares', monthly: 25000 }, { item: 'Consumables (wheels, oil, gas)', monthly: 20000 }, { item: 'Insurance', monthly: 6000 }, { item: 'Water and other utilities', monthly: 2500 }, { item: 'Outbound transport', monthly: 12000 }, { item: 'Worker housing, visas and buses', monthly: 9000 }] },
+        { mode: 'auto', output_per_month: 312000, land_m2: 4500, building_m2: 3000, material_per_unit: 0.4,
+          staff: [{ role: 'Robot and line technicians', count: 6, monthly_salary: 2000 }, { role: 'Maintenance engineers', count: 2, monthly_salary: 3000 }, { role: 'Quality engineer', count: 1, monthly_salary: 2800 }, { role: 'Logistics', count: 2, monthly_salary: 800 }, { role: 'Plant manager', count: 1, monthly_salary: 6000 }],
+          capex: [{ item: 'Fit-out of a leased building', amount: 800000 }, { item: 'Servo presses with automatic coil feed', amount: 900000 }, { item: 'Hardening furnace with robot loading', amount: 700000 }, { item: 'Robotic grinding cells', amount: 1600000 }, { item: 'Robots for handling between cells', amount: 1200000 }, { item: 'Moulding cells with robots', amount: 800000 }, { item: 'Automatic assembly machine', amount: 900000 }, { item: 'Vision and automatic cut testing', amount: 300000 }, { item: 'Automatic packing and palletising', amount: 700000 }, { item: 'Automated storage and AGVs', amount: 900000 }, { item: 'Software, integration and commissioning', amount: 600000 }],
+          power: { installed_kw: 1800, kwh_per_month: 420000, price_per_kwh: 0.03 },
+          opex: [{ item: 'Building lease', monthly: 4500 }, { item: 'Maintenance, spares and service contracts', monthly: 60000 }, { item: 'Consumables', monthly: 22000 }, { item: 'Insurance', monthly: 12000 }, { item: 'Water and other utilities', monthly: 2500 }, { item: 'Outbound transport', monthly: 12000 }, { item: 'Software licences', monthly: 6000 }, { item: 'Staff housing and visas', monthly: 2000 }] },
+      ],
+    },
     // the Factory tab: what it would take to make them (same shape as the AI's factory plan, see factory.js)
     factory: {
       applicable: true,
       summary: 'Steel strip is pressed into blade shapes, hardened and ground sharp; plastic handles are moulded on, then the halves are screwed together, tested and packed.',
       output: 'about 12,000 pairs a day',
       shifts: 2, workers_per_shift: 27,
-      investment: '$2.5–3.5 million', unit_cost: 'about $0.95 a pair',
+      investment: '$4–5 million', unit_cost: 'about $0.90 a pair',
       building: { length_m: 96, width_m: 40, height_m: 8 },
       materials: [
         { name: 'Stainless steel 420J2 strip, 2 mm', form: 'Coils of about 1 tonne', per_unit: '62 g', parts: [1, 2] },

@@ -326,12 +326,12 @@ function refreshFactory(r) {
 // pictures travel by id; only new ones (the floor, before/after) are sent. A link service that predates the
 // factory drops it (and says nothing about it), so then the plan is kept in this browser only.
 async function saveFactory(r) {
-  if (!r.factory || (!r.image_id && !r.image)) { cacheFactory(r); return; }
+  if ((!r.factory && !r.financials) || (!r.image_id && !r.image)) { cacheFactory(r); return; }
   try {
     const body = sharePayload({ ...r, image: r.image_id ? undefined : r.image, image_whole: r.image_id ? undefined : r.image_whole, q: state.result === r ? state.query : r.q });
     const res = await fetch(`${LINKS_API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const j = res.ok ? await res.json() : null;
-    if (j?.id && j.factory) {
+    if (j?.id && (j.factory || j.financials)) {
       r.image_id = j.id; r.image = null; r.image_whole = null;
       if (r.image_factory) { r.has_factory_img = true; r.image_factory = null; }
       const keys = [...new Set([...(r.state_keys || []), ...Object.keys(r.state_imgs || {})])];
@@ -355,7 +355,7 @@ async function saveFactory(r) {
 }
 function cacheFactory(r) {
   if (state.result !== r || !state.query || r === DEMO_RESULT()) return;
-  const { factory_ctrl, factory_busy, factory_error, ...keep } = r;
+  const { factory_ctrl, factory_busy, factory_error, money_busy, money_error, ...keep } = r;
   cachePut(cacheKey(state.query, r.lang || 'English', $('#level').value), keep);
 }
 const DEMO_RESULT = () => (typeof DEMO !== 'undefined' ? Object.values(DEMO).find((d) => d === state.result) : undefined);
