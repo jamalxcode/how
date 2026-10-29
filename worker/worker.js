@@ -3,6 +3,7 @@
 //   GET  /<id>          → the answer (without the picture bytes)
 //   GET  /img/<id>      → the exploded-view picture (jpeg)
 //   GET  /img/<id>/whole → the assembled picture, if any
+//   GET  /img/<id>/factory → the painted factory floor, if any
 //   GET  /gallery       → the curated list [{ id, title, hook, lang, svg }]
 //   POST /gallery       header X-Admin: <ADMIN_SECRET>, body { id, title, hook, lang, svg } → adds it
 //   DELETE /gallery/<id> header X-Admin                      → removes it
@@ -37,6 +38,7 @@ function cleanAnswer(d) {
     steps: LIST(d.steps, 20, (p) => (p && typeof p === 'object' ? { title: STR(p.title, 80) || '', text: STR(p.text, 600) || '' } : null)),
     badges: LIST(d.badges, 8, (b) => STR(b, 40)),
     image_id: /^[a-z0-9]{5,12}$/.test(d.image_id || '') ? d.image_id : undefined,
+    factory: cleanFactory(d.factory, Array.isArray(d.parts) ? Math.min(d.parts.length, 20) : 0),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
@@ -44,6 +46,30 @@ function cleanAnswer(d) {
   }
   for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
   return out;
+}
+// The Factory tab's plan (see factory.js, which trims it the same way before drawing).
+const STAGE_KEYS = ['materials', 'components', 'fabrication', 'assembly', 'quality', 'packing', 'shipping'];
+const WHO_KEYS = ['machine', 'both', 'human'];
+function cleanFactory(f, nParts) {
+  if (!f || typeof f !== 'object') return undefined;
+  const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const n = (v, lo, hi) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : lo; };
+  const list = (v, max, fn) => (Array.isArray(v) ? v.slice(0, max).filter((x) => x && typeof x === 'object').map(fn) : []);
+  const partNums = (v) => (Array.isArray(v) ? [...new Set(v.map((x) => Math.round(Number(x))))].filter((k) => k >= 1 && k <= nParts).slice(0, 12) : []);
+  const stage = (k) => (STAGE_KEYS.includes(k) ? k : 'fabrication');
+  const zones = list(f.zones, 12, (z) => ({
+    name: s(z.name, 60), name_en: s(z.name_en, 60), stage: stage(z.stage), length_m: n(z.length_m, 2, 120), width_m: n(z.width_m, 2, 80), staff: Math.round(n(z.staff, 0, 500)),
+    machines: list(z.machines, 6, (m) => ({ name: s(m.name, 60), count: Math.round(n(m.count, 1, 60)), length_m: n(m.length_m, 0.3, 60), width_m: n(m.width_m, 0.3, 30) })),
+  }));
+  return {
+    applicable: f.applicable !== false, summary: s(f.summary, 300), output: s(f.output, 100),
+    shifts: Math.round(n(f.shifts, 1, 3)), workers_per_shift: Math.round(n(f.workers_per_shift, 0, 9999)),
+    building: { length_m: n(f.building?.length_m, 5, 600), width_m: n(f.building?.width_m, 5, 400), height_m: n(f.building?.height_m, 2, 40) },
+    materials: list(f.materials, 10, (m) => ({ name: s(m.name, 80), form: s(m.form, 80), per_unit: s(m.per_unit, 40), parts: partNums(m.parts) })),
+    components: list(f.components, 20, (c) => ({ part: Math.round(n(c.part, 0, nParts)), make: !!c.make, process: s(c.process, 160) })).filter((c) => c.part >= 1),
+    steps: list(f.steps, 30, (st) => ({ stage: stage(st.stage), title: s(st.title, 60), text: s(st.text, 240), who: WHO_KEYS.includes(st.who) ? st.who : 'both', why: s(st.why, 140), parts: partNums(st.parts), zone: Math.round(n(st.zone, 0, zones.length)) })),
+    zones, floor_prompt: s(f.floor_prompt, 2000),
+  };
 }
 // Decoded picture bytes must start like a JPEG, PNG or WebP file.
 const looksLikeImage = (b) => b && b.length > 12 && (
@@ -189,9 +215,9 @@ export default {
       return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole)?$/.test(path)) {
-      const pid = path.split('/')[2]; const whole = path.endsWith('/whole');
-      const img = await env.LINKS.get(whole ? `imgw:${pid}` : `img:${pid}`, { type: 'arrayBuffer' });
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole|\/factory)?$/.test(path)) {
+      const pid = path.split('/')[2]; const which = path.split('/')[3];
+      const img = await env.LINKS.get(`${which === 'whole' ? 'imgw' : which === 'factory' ? 'imgf' : 'img'}:${pid}`, { type: 'arrayBuffer' });
       if (!img) return json({ error: 'not found' }, 404, h);
       return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
@@ -216,23 +242,27 @@ export default {
       if (!data || typeof data.title !== 'string') return json({ error: 'not an answer' }, 400, h);
       // the picture: either new bytes (data URL) or a reference to one already stored (image_id)
       const decode = (v) => { const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(v || ''); return m ? Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)) : null; };
-      let imgBytes = decode(data.image), wholeBytes = decode(data.image_whole);
-      if ((imgBytes && !looksLikeImage(imgBytes)) || (wholeBytes && !looksLikeImage(wholeBytes))) return json({ error: 'not a picture' }, 400, h);
+      let imgBytes = decode(data.image), wholeBytes = decode(data.image_whole), factBytes = decode(data.image_factory);
+      if ([imgBytes, wholeBytes, factBytes].some((b) => b && !looksLikeImage(b))) return json({ error: 'not a picture' }, 400, h);
       if (!imgBytes && data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) {
         imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' });
         if (!wholeBytes) wholeBytes = await env.LINKS.get(`imgw:${data.image_id}`, { type: 'arrayBuffer' });
+        if (!factBytes && data.has_factory_img) factBytes = await env.LINKS.get(`imgf:${data.image_id}`, { type: 'arrayBuffer' });
       }
       data = cleanAnswer(data);
       data.has_whole = !!wholeBytes;
+      if (factBytes && data.factory) data.has_factory_img = true;
       // same answer (+ same picture) → same id, so re-sharing never fills the store
       const body = JSON.stringify(data);
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '')));
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '') + (factBytes ? `f${factBytes.byteLength}` : '')));
       const k = [...new Uint8Array(digest).slice(0, 7)].map((x) => ALPHABET[x % ALPHABET.length]).join('');
       data.image_id = imgBytes ? k : (data.image_id || undefined);
       await env.LINKS.put(k, JSON.stringify(data));
       if (imgBytes) await env.LINKS.put(`img:${k}`, imgBytes);
       if (wholeBytes) await env.LINKS.put(`imgw:${k}`, wholeBytes);
-      return json({ id: k }, 200, h);
+      if (data.has_factory_img) await env.LINKS.put(`imgf:${k}`, factBytes);
+      // "factory" tells the page this service keeps factory plans (an older one drops them silently)
+      return json({ id: k, factory: !!data.factory }, 200, h);
     }
 
     return json({ ok: true, service: 'how-links', admin: !!env.ADMIN_SECRET }, 200, h);

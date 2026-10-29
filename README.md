@@ -17,6 +17,8 @@ It's a static site on GitHub Pages. Visitors sign in with their own OpenRouter a
 3. **Four views:** **Pulled apart** (the exploded view), **Whole** (the thing assembled, same numbers), **Real thing** (Wikipedia photos), **3D** (a Sketchfab model to spin). Under the picture: the numbered parts with a "How does this work?" link on each, step by step, a fun fact. The words appear as soon as Claude answers (~5 s); the two pictures fill in as they are painted. Tap a number on the picture and its card lights up; tap a card and its badge pulses.
 4. **Share.** A short link (`…/#scissors/s=k7x2mq9`) opens the same page for anyone, no sign-in. *Download report* saves one self-contained HTML file with the picture inside; *Download picture* saves the image. *Paint again* keeps the words and paints new pictures; *Remake* starts over with new words too.
 
+5. **🏭 Factory.** What it would take to make the thing, in the order it happens: raw materials, which parts are made and which are bought, how each is made, assembly, quality control, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both, with the reason. A line diagram and an automation bar sum it up; a floor plan drawn to scale shows each zone's size and the machines' footprints, with a painted overview of the floor above it. One click, ~6¢ (Claude ~2¢, the painting ~4¢); the scissors demo has one built in. It is saved with the page, so share links carry it.
+
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic. The home page shows a page from the gallery under the headline and a **Browse answers** grid, free to open.
 
 ## How it works
@@ -39,6 +41,7 @@ Question + language + audience
 - **"Something wrong?"** under every page flags it; the owner sees the list at `#flags`.
 - **Gallery:** the owner (page opened once with `#admin=<ADMIN_SECRET>`) gets an *Add to gallery* button.
 - **Follow-ups:** every part has "How does this work? →", which asks about that part in the context of the thing.
+- **Factory:** a second Claude call (strict JSON: materials, make-or-buy per part, 12–24 steps each marked machine / people / both, 6–10 floor zones with sizes in metres and machine footprints, and a picture prompt), then the image model paints the floor. The floor plan is drawn in the browser from the zone sizes (folded into a U or S when the line is long), so its dimensions are exact. Storing it needs the current `worker/worker.js`; an older link service drops the plan and the page keeps it in the browser only.
 - The earlier version, which asked Claude to draw animated SVG cutaways itself, is tagged `svg-era`. It produced lively but unrecognisable drawings; a painted picture wins.
 
 ## Files
@@ -48,7 +51,8 @@ Question + language + audience
 | `index.html` | the page |
 | `style.css` | picture-encyclopedia look (cream paper, ink lines), dark mode, RTL, mobile |
 | `app.js` | sign-in and keys, the prompt and schema, painting, storing, sharing, gallery, Wikipedia and Sketchfab |
-| `demo.js`, `demo-scissors.jpg` | the built-in demo page |
+| `factory.js` | the Factory tab: the plan's prompt and schema, the line diagram, the to-scale floor plan, the factory part of the report |
+| `demo.js`, `demo-scissors.jpg` | the built-in demo page, with its factory |
 | `worker/worker.js` | the link service: stores pages and pictures, short links, gallery, flags, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
 | `logo.svg`, `favicon-48.png`, `apple-touch-icon.png` | gear-with-a-question-mark badge, also the favicon and home-screen icon |
 | `og-image.jpg`, `robots.txt`, `sitemap.xml` | link preview picture and search-engine files |

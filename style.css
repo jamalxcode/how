@@ -359,3 +359,128 @@ body.has-result .hero-sub { display: none; }
 .tip-num { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; background: var(--red); color: #fff; font-weight: 900; display: grid; place-items: center; font-size: 13px; }
 .tip strong { display: block; font-family: var(--font-display); font-size: 16px; }
 .tip span:not(.tip-num) { color: #d9d2c2; }
+
+/* ---- factory: how it's made ---- */
+.factory { --fm: #d2491f; --fb: #e8b43a; --fh: #1f8a8a; }
+.fintro { text-align: center; padding: 18px 8px 8px; }
+.fintro h3 { font-family: var(--font-display); font-size: 26px; margin: 18px 0 6px; }
+.fintro p { color: var(--ink-2); max-width: 620px; margin: 0 auto 16px; }
+.fintro .btn small { font-weight: 600; opacity: .85; }
+.fintro .hint { font-size: 14px; margin-top: 10px; }
+.ferror { color: var(--red-dark); font-size: 14px; }
+.fsummary { text-align: center; font-family: var(--font-display); font-style: italic; font-size: 18px; color: var(--ink-2); max-width: 680px; margin: 4px auto 14px; }
+.ftiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ftile { background: var(--paper-2); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.ftile span { display: block; text-transform: uppercase; letter-spacing: .1em; font-size: 11px; font-weight: 800; color: var(--teal); }
+.ftile b { display: block; font-family: var(--font-display); font-size: 19px; line-height: 1.2; margin-top: 2px; }
+.ftile small { display: block; color: var(--muted); font-size: 13px; }
+
+/* the line: seven stations joined by a moving conveyor */
+.fline { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; position: relative; }
+.fline li { position: relative; text-align: center; }
+.fline li:not(:last-child)::after {
+  content: ""; position: absolute; top: 30px; left: calc(50% + 30px); right: calc(-50% + 30px); height: 4px; z-index: 0;
+  background: repeating-linear-gradient(90deg, var(--ink) 0 8px, transparent 8px 14px); background-size: 14px 4px; animation: belt 1s linear infinite; opacity: .55;
+}
+@keyframes belt { to { background-position: 14px 0; } }
+.fline button { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 100%; background: none; border: 0; padding: 0; position: relative; z-index: 1; }
+.fline .fic, .frail .fic { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 50%; background: var(--t); color: var(--c); border: 2.5px solid var(--c); box-shadow: 0 4px 0 -1px var(--c); transition: transform .12s; }
+.fline button:hover .fic { transform: translateY(-2px); }
+.fline b { font-family: var(--font-display); font-size: 14.5px; line-height: 1.15; margin-top: 6px; }
+.fline small { color: var(--muted); font-size: 12px; }
+.fwho { font-size: 12px; white-space: nowrap; }
+.fline-ghost { opacity: .9; margin-bottom: 4px; }
+.fline-ghost li { display: flex; flex-direction: column; align-items: center; }
+.fauto { margin: 16px auto 0; max-width: 720px; }
+.fbar { display: flex; height: 14px; border-radius: 999px; overflow: hidden; border: 2px solid var(--ink); }
+.fbar span + span { border-left: 2px solid var(--paper); }
+.fb-machine { background: var(--fm); } .fb-both { background: var(--fb); } .fb-human { background: var(--fh); }
+.flegend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; margin: 8px 0 0; font-size: 14px; color: var(--ink-2); }
+.flegend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: 0; }
+
+/* the floor */
+.ffig { margin: 10px 0 0; }
+.ffig img { display: block; width: 100%; height: auto; }
+.ffig figcaption { color: var(--muted); font-size: 13px; margin: 6px 2px 0; }
+.fpaint { text-align: center; margin: 8px 0; }
+.fplan-scroll { overflow-x: auto; }
+.fplan { display: block; width: 100%; height: auto; min-width: 680px; }
+.ftable-wrap { overflow-x: auto; margin-top: 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--paper-2); }
+.ftable { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px; }
+.ftable th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 10px 10px 6px; }
+.ftable td { padding: 8px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+.ftable td small { display: block; color: var(--muted); font-size: 12px; }
+.ftable td div small { display: inline; }
+.ftable .nw { white-space: nowrap; }
+.znum { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--c); color: #fff; font-weight: 900; font-size: 12px; }
+.mlet { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--c); color: var(--c); font-weight: 900; font-size: 11px; margin-right: 6px; background: var(--t); }
+
+/* the timeline */
+.ftimeline { margin-top: 10px; }
+.fstage { display: grid; grid-template-columns: 60px 1fr; gap: 14px; position: relative; padding-bottom: 18px; scroll-margin-top: 16px; }
+.fstage:not(:last-child)::before { content: ""; position: absolute; left: 28px; top: 62px; bottom: 0; width: 4px; background: repeating-linear-gradient(180deg, var(--line) 0 8px, transparent 8px 14px); }
+.fbody h4 { font-family: var(--font-display); font-size: 22px; margin: 12px 0 8px; color: var(--c); }
+.fbody h4 small { display: block; font-family: var(--font-body); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.fsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.fsteps li { background: var(--paper-2); border: 1.5px solid var(--line); border-left: 5px solid var(--c); border-radius: 14px; padding: 10px 12px 10px 46px; position: relative; }
+.fn { position: absolute; left: 10px; top: 10px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: #fff; font-weight: 900; font-size: 13px; }
+.fsteps strong { display: block; font-family: var(--font-display); font-size: 17px; }
+.fsteps p { margin: 2px 0 6px; color: var(--ink-2); font-size: 15px; }
+.fmeta, .fmeta2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; }
+.fmeta2 { margin-top: 6px; color: var(--muted); }
+.who { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 9px; font-weight: 800; font-size: 12.5px; color: #fff; white-space: nowrap; }
+.who-machine { background: var(--fm); } .who-both { background: #c8931a; } .who-human { background: var(--fh); }
+.why { color: var(--muted); font-style: italic; }
+.fzone { white-space: nowrap; }
+.pdot { display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); font-weight: 900; font-size: 11px; margin: 0 1px; vertical-align: middle; }
+.pdot:hover { background: var(--red); color: #fff; }
+.fmats { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.fmat { background: var(--t); border: 1.5px solid var(--c); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.fmat b { font-family: var(--font-display); font-size: 16px; line-height: 1.2; color: #1d2433; }
+.fmat span { color: #4a5263; font-size: 14px; }
+.fmat-foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-top: 4px; }
+.fmat em { font-style: normal; font-weight: 800; color: #1d2433; }
+.fcomps { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.fcomps li { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: 4px 10px; background: var(--paper-2); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+.fcomps b { font-family: var(--font-display); font-size: 16px; }
+.mk { border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.mk-make { background: var(--t); color: var(--c); border: 1.5px solid var(--c); }
+.mk-buy { background: transparent; color: var(--muted); border: 1.5px dashed var(--muted); }
+.fproc { color: var(--ink-2); font-size: 14px; }
+.result[dir="rtl"] .fsteps li { padding: 10px 46px 10px 12px; border-left: 1.5px solid var(--line); border-right: 5px solid var(--c); }
+.result[dir="rtl"] .fn { left: auto; right: 10px; }
+.result[dir="rtl"] .fstage:not(:last-child)::before { left: auto; right: 28px; }
+.result[dir="rtl"] .ftable th { text-align: right; }
+.result[dir="rtl"] .fline li:not(:last-child)::after { left: calc(-50% + 30px); right: calc(50% + 30px); }
+@media (max-width: 760px) {
+  .ftiles { grid-template-columns: 1fr 1fr; }
+  .fline { display: flex; overflow-x: auto; scrollbar-width: none; padding-bottom: 6px; }
+  .fline li { flex: 0 0 96px; }
+  .fline li:not(:last-child)::after { left: calc(50% + 30px); right: calc(-50% + 30px); }
+}
+@media (max-width: 560px) {
+  .fstage { grid-template-columns: 44px 1fr; gap: 10px; }
+  .frail .fic { width: 44px; height: 44px; }
+  .frail .fic svg { width: 20px; height: 20px; }
+  .fstage:not(:last-child)::before { left: 20px; top: 46px; }
+  .fsteps { grid-template-columns: 1fr; }
+  .fcomps li { grid-template-columns: auto 1fr auto; }
+  .fcomps .fproc { grid-column: 1 / -1; }
+}
+@media (prefers-color-scheme: dark) {
+  .fline .fic, .frail .fic { background: var(--paper-2); }
+}
+@media (prefers-reduced-motion: reduce) { .fline li::after { animation: none; } }
+@media (prefers-color-scheme: dark) { .fbody h4 { color: var(--ink); } }
+.fswipe { display: none; }
+@media (max-width: 560px) {
+  .fswipe { display: inline; }
+  .ftable { min-width: 0; }
+  .ftable thead { display: none; }
+  .ftable tr { display: grid; grid-template-columns: 30px 1fr auto; gap: 4px 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .ftable tr:first-child { border-top: 0; }
+  .ftable td { border: 0; padding: 0; }
+  .ftable td:nth-child(4) { grid-column: 2 / -1; }
+  .ftable td:nth-child(5) { grid-column: 2 / -1; color: var(--muted); font-size: 13px; }
+  .ftable td:nth-child(5)::before { content: "Staff per shift: "; }
+}

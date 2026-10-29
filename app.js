@@ -83,7 +83,7 @@ function loadCache() { try { return JSON.parse(store.get(CACHE_KEY) || '{}'); } 
 function cacheGet(k) { return loadCache()[k] || null; }
 function cachePut(k, result) {
   const c = loadCache();
-  c[k] = { ...result, image: result.image_id ? undefined : result.image, image_whole: result.image_id ? undefined : result.image_whole, at: Date.now() }; // pictures live in the link service
+  c[k] = { ...result, image: result.image_id ? undefined : result.image, image_whole: result.image_id ? undefined : result.image_whole, image_factory: result.image_id && result.has_factory_img ? undefined : result.image_factory, at: Date.now() }; // pictures live in the link service
   const keys = Object.keys(c).sort((a, b) => c[b].at - c[a].at);
   keys.slice(CACHE_MAX).forEach((old) => delete c[old]);
   store.set(CACHE_KEY, JSON.stringify(c));
@@ -411,6 +411,8 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   renderAdmin();
 
   $('#tab-whole').hidden = !wholeUrl(result);
+  $('#tab-factory').hidden = result.kind === 'refused';
+  if (result.factory) result.factory = cleanFactory(result.factory, (result.parts || []).length);
   pictureMode = 'exploded';
 
   const parts = $('#parts'); parts.innerHTML = '';
@@ -523,6 +525,8 @@ function setView(view) {
   $('#view-picture').hidden = !pic;
   $('#view-photos').hidden = view !== 'photos';
   $('#view-model3d').hidden = view !== 'model3d';
+  $('#view-factory').hidden = view !== 'factory';
+  if (view === 'factory') renderFactory();
 }
 
 // ---------- photos of the real thing (Wikipedia) ----------
@@ -642,10 +646,10 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query };
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined };
 }
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
@@ -689,6 +693,10 @@ async function buildReport() {
   const steps = (r.steps || []).map((st, i) => `<li><span class="n">${i + 1}</span><b>${esc(st.title)}</b><span>${esc(st.text)}</span></li>`).join('');
   const wiki = `https://en.wikipedia.org/wiki/${encodeURIComponent((r.wikipedia_title || state.query || '').replace(/ /g, '_'))}`;
   const sk = `https://sketchfab.com/search?q=${encodeURIComponent(r.search_terms || state.query || '')}&type=models`;
+  const fac = typeof factoryReportHTML === 'function' ? factoryReportHTML(r) : null;
+  let facPic = fac?.pic || '';
+  if (facPic) { try { facPic = await blobToDataUrl(await (await fetch(facPic)).blob()); } catch {} }
+  const factory = fac ? fac.html.replace('%%FACTORY_PIC%%', facPic ? `<div class="stage"><img src="${esc(facPic)}" alt="Factory floor"></div>` : '') : '';
   const m = state.model3d;
   const model = m?.uid && SK_UID.test(m.uid) ? `<h2>In 3D</h2><div class="stage three"><iframe title="3D model" src="https://sketchfab.com/models/${esc(m.uid)}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div><p class="credit"><a href="${esc(skUrl(m.url, m.uid))}">${esc(m.name || '3D model')}</a> by ${esc(m.by || 'a Sketchfab artist')} on Sketchfab (needs an internet connection).</p>` : '';
   return `<!doctype html><html lang="${langCode(r.lang)}" dir="${rtl ? 'rtl' : 'ltr'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -720,6 +728,9 @@ li span:not(.n){color:#4a5263;font-size:15px}
 .links a.main{background:#e4572e;border-color:#e4572e;color:#fff}
 footer{margin-top:30px;text-align:center;color:#7d8494;font-size:13px}
 footer a{color:inherit}
+h3{font-family:Fraunces,Georgia,serif;font-size:18px;margin:18px 0 8px}
+.stage.plan{overflow-x:auto;margin:12px 0}.stage.plan svg{display:block;width:100%;height:auto;min-width:640px}
+.zt{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}.zt th,.zt td{text-align:left;padding:6px 8px;border-bottom:1px solid #d9cdb2;vertical-align:top}
 </style></head><body><main>
 <p class="eyebrow">${r.kind === 'process' ? 'How it is done' : 'How it works'}</p>
 <h1>${esc(r.title)}</h1>
@@ -730,6 +741,7 @@ ${whole ? `<div class="stage"><img src="${esc(whole)}" alt="${esc(r.title)}"></d
 <h2>Step by step</h2><ol>${steps}</ol>
 ${r.fun_fact ? `<p class="fact"><b>Did you know?</b> ${esc(r.fun_fact)}</p>` : ''}
 ${model}
+${factory}
 <div class="links"><a class="main" href="${esc(link)}">Open on How (photos, 3D)</a><a href="${wiki}">Photos on Wikipedia</a><a href="${esc(sk)}">3D models on Sketchfab</a></div>
 <footer>Made with <a href="${SITE_URL}">How</a> — type a thing, see how it works. Picture by AI; check important details against a trusted source.</footer>
 </main></body></html>`;
@@ -807,7 +819,7 @@ async function openStored(id, title, { shared = false } = {}) {
     if (!res.ok) throw new Error();
     const r = await res.json();
     const q = r.q || r.title; delete r.q;
-    r.image = undefined; r.image_whole = undefined; r.image_id = id; // pictures are served by the link service
+    r.image = undefined; r.image_whole = undefined; r.image_factory = undefined; r.image_id = id; // pictures are served by the link service
     $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
     location.hash = `${encodeURIComponent((r.title || q).replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${id}`;
     state.shortId = id;
@@ -862,7 +874,7 @@ $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {} } : null }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {}, image_factory: null, has_factory_img: false } : null }));
 $('#remake').addEventListener('click', () => ask(state.query, { force: true }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
