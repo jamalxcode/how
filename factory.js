@@ -17,6 +17,7 @@ const STAGES = [
 ];
 const STAGE_KEYS = STAGES.map((s) => s.key);
 const stageOf = (k) => STAGES.find((s) => s.key === k) || STAGES[2];
+const stageName = (st) => tx(`stage_${st.key}`);
 const WHO = {
   machine: { icon: '🤖', label: 'Machine' },
   both: { icon: '🤝', label: 'People + machine' },
@@ -302,8 +303,8 @@ function fillState(r, key) {
 function tile(r, key, alt) {
   const url = stateUrl(r, key);
   if (url) return { cls: '', html: `<img src="${escapeHTML(url)}" alt="${escapeHTML(alt)}" decoding="async">` };
-  if (r.state_running?.has(key)) return { cls: 'waiting', html: '<span>Painting now…</span>' };
-  if (r.factory_busy === 'states' || r.factory_busy === 'all') return { cls: 'queued', html: '<span>In the queue</span>' };
+  if (r.state_running?.has(key)) return { cls: 'waiting', html: `<span>${tx('paintingNow')}</span>` };
+  if (r.factory_busy === 'states' || r.factory_busy === 'all') return { cls: 'queued', html: `<span>${tx('inQueue')}</span>` };
   return { cls: '', html: '<span>—</span>' };
 }
 // Swap in the parts that change while the pictures come in, leaving the rest of the tab (and the
@@ -366,9 +367,9 @@ function renderFactoryIfShown(r) { if (state.result === r && !$('#view-factory')
 function stageIcon(st, size = 26) {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${st.icon}</svg>`;
 }
-function whoChip(who) { const w = WHO[who] || WHO.both; return `<span class="who who-${who}">${w.icon} ${w.label}</span>`; }
+function whoChip(who) { const w = WHO[who] || WHO.both; return `<span class="who who-${who}">${w.icon} ${tx(`who_${WHO[who] ? who : 'both'}`)}</span>`; }
 function partDots(nums, r) {
-  return nums.map((k) => `<button type="button" class="pdot" data-part="${k}" title="${escapeHTML(r.parts?.[k - 1]?.name || `Part ${k}`)}">${k}</button>`).join('');
+  return nums.map((k) => `<button type="button" class="pdot" data-part="${k}" title="${escapeHTML(r.parts?.[k - 1]?.name || tx('partN', { n: k }))}">${k}</button>`).join('');
 }
 const fmtM = (x) => (Math.round(x * 10) / 10).toLocaleString('en');
 const fmtArea = (x) => Math.round(x).toLocaleString('en');
@@ -379,7 +380,7 @@ function renderFactory() {
   if (r.progress && !r.progress.end) tickProgress();
   const modes = modesHTML(r);
   if (r.factory_busy === 'plan') {
-    box.innerHTML = `${progressHTML(r)}${modes}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p>${progButton('Planning…')}</div>`;
+    box.innerHTML = `${progressHTML(r)}${modes}<div class="fintro">${ghostLine(true)}<p>${tx('planningText')}</p>${progButton(tx('planningBtn'))}</div>`;
     drawProgress(r);
     return;
   }
@@ -387,20 +388,20 @@ function renderFactory() {
     const m = modeOf(r.factory_mode);
     box.innerHTML = `${modes}<div class="fintro">
       ${ghostLine(false)}
-      <h3>${r.factories && Object.keys(r.factories).length ? `${m.icon} The ${m.name.toLowerCase()} version of this factory` : `How would you make ${esc(r.title || 'this')}?`}</h3>
-      <p>See what a factory for it would need, in the order it happens: the raw materials, which parts are made and which are bought, the machines, assembly, quality checks, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both. You also get a factory floor plan drawn to scale, and before and after pictures for every zone.</p>
+      <h3>${r.factories && Object.keys(r.factories).length ? `${m.icon} ${tx('versionTitle', { name: tx(`mode_${m.key}`) })}` : tx('howMake', { thing: esc(r.title || '') })}</h3>
+      <p>${tx('factoryIntro')}</p>
       ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
-      ${state.key ? `<button type="button" class="btn btn-primary" id="factory-go">${m.icon} Plan the ${m.name.toLowerCase()} factory <small>${FACTORY_COST}</small></button>`
-        : `<button type="button" class="btn btn-ghost" id="factory-signin">Sign in to OpenRouter to plan it (${FACTORY_COST})</button><p class="hint">Or open the free <button type="button" class="link" id="factory-demo">scissors demo</button>, which has a factory built in.</p>`}
+      ${state.key ? `<button type="button" class="btn btn-primary" id="factory-go">${m.icon} ${tx('planBtn', { name: tx(`mode_${m.key}`) })} <small>${FACTORY_COST}</small></button>`
+        : `<button type="button" class="btn btn-ghost" id="factory-signin">${tx('signInPlan', { c: FACTORY_COST })}</button><p class="hint">${tx('orDemo', { demo: `<button type="button" class="link" id="factory-demo">${tx('scissorsDemo')}</button>` })}</p>`}
     </div>`;
     wireModes(r);
     $('#factory-go')?.addEventListener('click', makeFactory);
     $('#factory-signin')?.addEventListener('click', signIn);
-    $('#factory-demo')?.addEventListener('click', () => { $('#lang').value = 'English'; ask('scissors'); setTimeout(() => setView('factory'), 50); });
+    $('#factory-demo')?.addEventListener('click', () => openDemo('factory'));
     return;
   }
   if (!f.applicable) {
-    box.innerHTML = `${modes}<div class="fintro"><h3>Nothing to manufacture here</h3><p>${esc(f.summary)}</p></div>`;
+    box.innerHTML = `${modes}<div class="fintro"><h3>${tx('nothingToMake')}</h3><p>${esc(f.summary)}</p></div>`;
     wireModes(r);
     return;
   }
@@ -413,67 +414,72 @@ function renderFactory() {
   const staff = f.workers_per_shift || f.zones.reduce((a, z) => a + z.staff, 0);
   let stepNo = 0;
   const floorPic = factoryUrl(r);
+  const wide = window.innerWidth > 760 ? ' open' : '';
 
   box.innerHTML = `${progressHTML(r)}${modes}${compareHTML(r)}
     <p class="fsummary">${esc(f.summary)}</p>
     <div class="ftiles">
-      <div class="ftile"><span>Output</span><b>${esc(f.output || '—')}</b></div>
-      <div class="ftile"><span>Floor space</span><b>${lay ? `${fmtArea(lay.L * lay.W)} m²` : '—'}</b><small>${lay ? `${fmtM(lay.L)} × ${fmtM(lay.W)} m, ${fmtM(f.building.height_m)} m high` : ''}</small></div>
-      <div class="ftile"><span>People</span><b>${staff} per shift</b><small>${f.shifts} shift${f.shifts > 1 ? 's' : ''} a day</small></div>
-      <div class="ftile"><span>Automated</span><b>${pct('machine')}% of steps</b><small>${pct('both')}% shared, ${pct('human')}% by hand</small></div>
-      ${f.investment ? `<div class="ftile"><span>Investment</span><b>${esc(f.investment)}</b><small>machines and fit-out</small></div>` : ''}
-      ${f.unit_cost ? `<div class="ftile"><span>Cost to make one</span><b>${esc(f.unit_cost)}</b><small>materials, labour, machines</small></div>` : ''}
+      <div class="ftile"><span>${tx('output')}</span><b>${esc(f.output || '—')}</b></div>
+      <div class="ftile"><span>${tx('floorSpace')}</span><b>${lay ? `${fmtArea(lay.L * lay.W)} m²` : '—'}</b><small>${lay ? tx('mHigh', { l: fmtM(lay.L), w: fmtM(lay.W), h: fmtM(f.building.height_m) }) : ''}</small></div>
+      <div class="ftile"><span>${tx('people')}</span><b>${tx('perShift', { n: staff })}</b><small>${tx('shiftsDay', { n: f.shifts })}</small></div>
+      <div class="ftile"><span>${tx('automated')}</span><b>${tx('pctSteps', { p: pct('machine') })}</b><small>${tx('sharedByHand', { a: pct('both'), b: pct('human') })}</small></div>
+      ${f.investment ? `<div class="ftile"><span>${tx('investment')}</span><b>${esc(f.investment)}</b><small>${tx('machinesFitout')}</small></div>` : ''}
+      ${f.unit_cost ? `<div class="ftile"><span>${tx('costOne')}</span><b>${esc(f.unit_cost)}</b><small>${tx('matLabMach')}</small></div>` : ''}
     </div>
 
-    <h3 class="list-h">The line, in order</h3>
+    <h3 class="list-h">${tx('lineInOrder')}</h3>
     <ol class="fline${r.factory_busy ? ' busy' : ''}">${STAGES.map((st) => {
       const ss = f.steps.filter((s) => s.stage === st.key);
       const c = (k) => ss.filter((s) => s.who === k).length;
-      return `<li style="--c:${st.color};--t:${st.tint}"><button type="button" data-go="${st.key}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b><small>${ss.length} step${ss.length === 1 ? '' : 's'}</small><span class="fwho">${['machine', 'both', 'human'].filter((k) => c(k)).map((k) => `${WHO[k].icon}${c(k)}`).join(' ')}</span></button></li>`;
+      return `<li style="--c:${st.color};--t:${st.tint}"><button type="button" data-go="${st.key}"><span class="fic">${stageIcon(st)}</span><b>${stageName(st)}</b><small>${tx('nSteps', { n: ss.length })}</small><span class="fwho">${['machine', 'both', 'human'].filter((k) => c(k)).map((k) => `${WHO[k].icon}${c(k)}`).join(' ')}</span></button></li>`;
     }).join('')}</ol>
     <div class="fauto" role="img" aria-label="${pct('machine')}% machine, ${pct('both')}% people and machine, ${pct('human')}% people">
       <div class="fbar">${['machine', 'both', 'human'].map((k) => (counts[k] ? `<span class="fb-${k}" style="flex:${counts[k]}"></span>` : '')).join('')}</div>
-      <p class="flegend">${['machine', 'both', 'human'].map((k) => `<span><i class="fb-${k}"></i>${WHO[k].icon} ${WHO[k].label} <b>${counts[k]}</b></span>`).join('')}</p>
+      <p class="flegend">${['machine', 'both', 'human'].map((k) => `<span><i class="fb-${k}"></i>${WHO[k].icon} ${tx(`who_${k}`)} <b>${counts[k]}</b></span>`).join('')}</p>
     </div>
 
-    <h3 class="list-h">Factory floor</h3>
+    <h3 class="list-h">${tx('factoryFloor')}</h3>
     <div id="ffloor-slot">${floorHTML(r)}</div>
     <p class="ferror" id="ferr"${r.factory_error ? '' : ' hidden'}>${esc(r.factory_error || '')}</p>
-    ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>Floor plan drawn to scale from the zone sizes. Material flows along the arrows, from IN to OUT; letters are machines, listed below. Point at (or tap) a zone to see its before and after.<span class="fswipe"> Swipe sideways to see all of it.</span></figcaption></figure>` : ''}
+    ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>${tx('planCaption')}<span class="fswipe"> ${tx('swipe')}</span></figcaption></figure>` : ''}
+    <details class="fsec"${wide}><summary><h3 class="list-h">${tx('zone')} · ${tx('machinesEach')}</h3></summary>
     <div class="ftable-wrap"><table class="ftable">
-      <thead><tr><th>#</th><th>Zone</th><th>Size</th><th>Machines (footprint each)</th><th>Staff</th></tr></thead>
+      <thead><tr><th>#</th><th>${tx('zone')}</th><th>${tx('size')}</th><th>${tx('machinesEach')}</th><th>${tx('staff')}</th></tr></thead>
       <tbody>${f.zones.map((z, i) => { const st = stageOf(z.stage); return `<tr style="--c:${st.color};--t:${st.tint}">
-        <td><span class="znum">${i + 1}</span></td><td><b>${esc(z.name)}</b><small>${st.name}</small></td>
+        <td><span class="znum">${i + 1}</span></td><td><b>${esc(z.name)}</b><small>${stageName(st)}</small></td>
         <td class="nw">${fmtM(z.length_m)} × ${fmtM(z.width_m)} m<small>${fmtArea(z.length_m * z.width_m)} m²</small></td>
         <td>${z.machines.map((m, k) => `<div><span class="mlet">${String.fromCharCode(65 + k)}</span>${m.count} × ${esc(m.name)} <small>${fmtM(m.length_m)} × ${fmtM(m.width_m)} m</small></div>`).join('') || '—'}</td>
-        <td class="nw">${z.staff}</td></tr>`; }).join('')}</tbody>
+        <td class="nw" data-label="${tx('staffPerShift')}">${z.staff}</td></tr>`; }).join('')}</tbody>
     </table></div>
+    </details>
 
-    <h3 class="list-h">Zone by zone: before → after</h3>
+    <details class="fsec"${wide}><summary><h3 class="list-h">${tx('zoneByZone')}</h3></summary>
     <div id="fstates">${statesHTML(r, f)}</div>
+    </details>
 
-    <h3 class="list-h">Step by step, from raw material to truck</h3>
+    <details class="fsec"${wide}><summary><h3 class="list-h">${tx('stepByStepTruck')}</h3></summary>
     <div class="ftimeline">${STAGES.map((st, si) => {
       const ss = f.steps.filter((s) => s.stage === st.key);
       let extra = '';
       if (st.key === 'materials' && f.materials.length) {
-        extra = `<div class="fmats">${f.materials.map((m) => `<div class="fmat"><b>${esc(m.name)}</b><span>${esc(m.form)}</span><span class="fmat-foot">${m.per_unit ? `<em>${esc(m.per_unit)} each</em>` : ''}${m.parts.length ? `<span class="fto">→ ${partDots(m.parts, r)}</span>` : ''}</span></div>`).join('')}</div>`;
+        extra = `<div class="fmats">${f.materials.map((m) => `<div class="fmat"><b>${esc(m.name)}</b><span>${esc(m.form)}</span><span class="fmat-foot">${m.per_unit ? `<em>${tx('eachUnit', { v: esc(m.per_unit) })}</em>` : ''}${m.parts.length ? `<span class="fto">→ ${partDots(m.parts, r)}</span>` : ''}</span></div>`).join('')}</div>`;
       }
       if (st.key === 'components' && f.components.length) {
-        extra = `<ul class="fcomps">${f.components.map((c) => `<li><span class="pdot-wrap">${partDots([c.part], r)}</span><b>${esc(r.parts?.[c.part - 1]?.name || `Part ${c.part}`)}</b><span class="mk mk-${c.make ? 'make' : 'buy'}">${c.make ? 'Made here' : 'Bought in'}</span><span class="fproc">${esc(c.process)}</span></li>`).join('')}</ul>`;
+        extra = `<ul class="fcomps">${f.components.map((c) => `<li><span class="pdot-wrap">${partDots([c.part], r)}</span><b>${esc(r.parts?.[c.part - 1]?.name || tx('partN', { n: c.part }))}</b><span class="mk mk-${c.make ? 'make' : 'buy'}">${tx(c.make ? 'madeHere' : 'boughtIn')}</span><span class="fproc">${esc(c.process)}</span></li>`).join('')}</ul>`;
       }
       if (!ss.length && !extra) return '';
       return `<section class="fstage" id="fstage-${st.key}" style="--c:${st.color};--t:${st.tint}">
         <div class="frail"><span class="fic">${stageIcon(st)}</span></div>
-        <div class="fbody"><h4><small>Stage ${si + 1}</small>${st.name}</h4>${extra}
+        <div class="fbody"><h4><small>${tx('stageN', { n: si + 1 })}</small>${stageName(st)}</h4>${extra}
           <ol class="fsteps">${ss.map((s) => { stepNo++; const z = f.zones[s.zone - 1]; return `<li>
             <span class="fn">${stepNo}</span><strong>${esc(s.title)}</strong><p>${esc(s.text)}</p>
             <div class="fmeta">${whoChip(s.who)}${s.why ? `<span class="why">${esc(s.why)}</span>` : ''}</div>
-            ${s.parts.length || z ? `<div class="fmeta2">${s.parts.length ? `<span class="fparts">Parts ${partDots(s.parts, r)}</span>` : ''}${z ? `<span class="fzone">Zone ${s.zone} · ${esc(z.name)}</span>` : ''}</div>` : ''}
+            ${s.parts.length || z ? `<div class="fmeta2">${s.parts.length ? `<span class="fparts">${tx('parts')} ${partDots(s.parts, r)}</span>` : ''}${z ? `<span class="fzone">${tx('zoneN', { n: s.zone })} · ${esc(z.name)}</span>` : ''}</div>` : ''}
           </li>`; }).join('')}</ol>
         </div></section>`;
     }).join('')}</div>
-    <p class="credit">A rough plan by AI for learning and first estimates, not an engineering quote. Sizes, machines and numbers are typical, not exact.</p>`;
+    </details>
+    <p class="credit">${tx('factoryCredit')}</p>`;
 
   $$('[data-go]', box).forEach((b) => b.addEventListener('click', () => $(`#fstage-${b.dataset.go}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
   $$('.pdot', box).forEach((b) => b.addEventListener('click', () => { setView('exploded'); setTimeout(() => pingPart(Number(b.dataset.part)), 60); }));
@@ -487,20 +493,20 @@ function renderFactory() {
 
 // The seven stations without numbers: on the intro, and (with a moving belt) while the plan is made.
 function ghostLine(busy) {
-  return `<ol class="fline fline-ghost${busy ? ' busy' : ''}" aria-hidden="true">${STAGES.map((st) => `<li style="--c:${st.color};--t:${st.tint}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b></li>`).join('')}</ol>`;
+  return `<ol class="fline fline-ghost${busy ? ' busy' : ''}" aria-hidden="true">${STAGES.map((st) => `<li style="--c:${st.color};--t:${st.tint}"><span class="fic">${stageIcon(st)}</span><b>${stageName(st)}</b></li>`).join('')}</ol>`;
 }
 
 function statesHTML(r, f) {
   const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states' || r.factory_busy === 'all';
   const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before'), stateKey(st, i, 'after')].filter((k) => !stateUrl(r, k)).length, 0) : 0;
-  const button = busy ? progButton(sts.length ? 'Painting…' : 'Describing each zone…')
+  const button = busy ? progButton(tx(sts.length ? 'paintingBtn' : 'describingBtn'))
     : !sts.length || missing ? (state.key
-      ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${sts.length ? 'Paint the missing pictures' : 'Show what goes in and comes out of each zone'} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
-      : `<p class="hint fpaint">Sign in to OpenRouter (top right) to paint a before and after picture for every zone (${STATES_COST}).</p>`) : '';
-  if (!sts.length) return busy ? `<p class="fwait">Working out what each zone takes in and sends out… the pictures follow.</p>` : button;
+      ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${tx(sts.length ? 'paintMissing' : 'showInOut')} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
+      : `<p class="hint fpaint">${tx('signInStates', { c: STATES_COST })}</p>`) : '';
+  if (!sts.length) return busy ? `<p class="fwait">${tx('workingStates')}</p>` : button;
   const pic = (st, i, which) => {
     const key = stateKey(st, i, which); const lab = st[which].label; const t = tile(r, key, lab);
-    return `<figure><div class="fbimg ${t.cls}" data-skey="${key}" data-alt="${esc(lab)}">${t.html}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(lab)}</figcaption></figure>`;
+    return `<figure><div class="fbimg ${t.cls}" data-skey="${key}" data-alt="${esc(lab)}">${t.html}</div><figcaption><small>${tx(which)}</small>${esc(lab)}</figcaption></figure>`;
   };
   return `${button}<div class="fba">${f.zones.map((z, i) => {
     const st = sts[i]; if (!st) return ''; const sg = stageOf(z.stage);
@@ -515,32 +521,32 @@ function modesHTML(r) {
   const cur = r.factory_mode || 'mixed'; const busy = !!r.factory_busy;
   const has = (k) => (k === cur ? !!r.factory : !!r.factories?.[k]?.factory);
   return `<div class="fmodes" role="tablist" aria-label="How automated">${MODES.map((m) => `<button type="button" role="tab" class="fmode${m.key === cur ? ' active' : ''}" data-mode="${m.key}" aria-selected="${m.key === cur}"${busy && m.key !== cur ? ' disabled' : ''}>
-    <span class="fm-ic">${m.icon}</span><b>${m.name}</b><small>${m.note}</small><em>${has(m.key) ? 'planned' : m.key === cur && busy ? 'planning…' : `not planned yet · ${FACTORY_COST}`}</em></button>`).join('')}</div>`;
+    <span class="fm-ic">${m.icon}</span><b>${tx(`mode_${m.key}`)}</b><small>${tx(`modeNote_${m.key}`)}</small><em>${has(m.key) ? tx('planned') : m.key === cur && busy ? tx('planning') : tx('notPlanned', { c: FACTORY_COST })}</em></button>`).join('')}</div>`;
 }
 function wireModes(r) { $$('#factory [data-mode]').forEach((b) => b.addEventListener('click', () => switchMode(r, b.dataset.mode))); }
 function compareHTML(r) {
   const vs = allVersions(r); if (vs.length < 2) return '';
   const cur = r.factory_mode || 'mixed'; const esc = escapeHTML;
   const rows = [
-    ['People per shift', (s) => `${s.staff}${s.shifts > 1 ? ` <small>× ${s.shifts} shifts</small>` : ''}`],
-    ['Steps by machine alone', (s) => `${s.machine}%`],
-    ['Steps by hand', (s) => `${s.human}%`],
-    ['Floor space', (s) => (s.area ? `${fmtArea(s.area)} m²` : '—')],
-    ['Output', (s) => esc(s.output || '—')],
-    ['Investment', (s) => esc(s.investment || '—')],
-    ['Cost to make one', (s) => esc(s.unit_cost || '—')],
+    [tx('staffPerShift'), (s) => `${s.staff}${s.shifts > 1 ? ` <small>${tx('xShifts', { n: s.shifts })}</small>` : ''}`],
+    [tx('cmpMachine'), (s) => `${s.machine}%`],
+    [tx('cmpHand'), (s) => `${s.human}%`],
+    [tx('floorSpace'), (s) => (s.area ? `${fmtArea(s.area)} m²` : '—')],
+    [tx('output'), (s) => esc(s.output || '—')],
+    [tx('investment'), (s) => esc(s.investment || '—')],
+    [tx('costOne'), (s) => esc(s.unit_cost || '—')],
   ];
   const stats = vs.map((v) => ({ ...v, s: versionStats(v.f) }));
-  return `<div class="fcompare"><table><thead><tr><th></th>${stats.map((v) => `<th class="${v.mode.key === cur ? 'cur' : ''}">${v.mode.icon} ${v.mode.name}</th>`).join('')}</tr></thead>
+  return `<div class="fcompare"><table><thead><tr><th></th>${stats.map((v) => `<th class="${v.mode.key === cur ? 'cur' : ''}">${v.mode.icon} ${tx(`mode_${v.mode.key}`)}</th>`).join('')}</tr></thead>
     <tbody>${rows.map(([label, fn]) => `<tr><th>${label}</th>${stats.map((v) => `<td class="${v.mode.key === cur ? 'cur' : ''}">${fn(v.s)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function floorHTML(r) {
   const esc = escapeHTML; const f = r.factory; const url = factoryUrl(r);
-  if (url) return `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(url)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>Painted overview: an impression, not to scale. Point at (or tap) a number to see what that zone does.</figcaption></figure>`;
-  if (r.factory_busy === 'paint') return progButton('Painting the floor…');
-  if (r.factory_busy === 'all') return `<div class="stage ffloor-wait"><div class="painting">${loaderSVG()}<p>Painting the factory floor</p></div></div>`;
-  return f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : '';
+  if (url) return `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(url)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>${tx('floorCaption')}</figcaption></figure>`;
+  if (r.factory_busy === 'paint') return progButton(tx('paintingFloor'));
+  if (r.factory_busy === 'all') return `<div class="stage ffloor-wait"><div class="painting">${loaderSVG()}<p>${tx('paintingFactoryFloor')}</p></div></div>`;
+  return f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 ${tx('paintOverview')} <small>~4¢</small></button></p>` : '';
 }
 
 // ---------- progress: what is done, what is left, about how long ----------
@@ -554,6 +560,7 @@ const TASKS = {
 const PIC_LANES = 4, PIC_SECS = 22;
 function startProgress(r, keys) {
   r.progress = { t0: Date.now(), tasks: keys.map((key) => ({ key, ...TASKS[key], status: 'wait', since: 0, done: 0, total: 0 })) };
+  r.progress.tasks.forEach((t) => { t.label = tx(`task_${t.key}`); });
   tickProgress();
 }
 function task(r, key, status, extra = {}) {
@@ -597,15 +604,15 @@ function drawProgress(r) {
   const pct = `${Math.round(frac * 100)}%`;
   // the Factory tab and the button that started it fill up too
   const tab = $('#tab-factory');
-  if (tab) { tab.classList.toggle('prog', !p.end); tab.style.setProperty('--prog', pct); tab.textContent = p.end ? '🏭 Factory' : `🏭 Factory ${pct}`; }
-  $$('[data-prog]').forEach((b) => { b.style.setProperty('--prog', pct); b.querySelector('.bp-text').textContent = p.end ? 'Done' : `${b.dataset.prog} ${pct} · about ${fmtSecs(left)} left`; });
+  if (tab) { tab.classList.toggle('prog', !p.end); tab.style.setProperty('--prog', pct); tab.textContent = p.end ? tx('tab_factory') : `${tx('tab_factory')} ${pct}`; }
+  $$('[data-prog]').forEach((b) => { b.style.setProperty('--prog', pct); b.querySelector('.bp-text').textContent = p.end ? tx('done') : `${b.dataset.prog} ${tx('pctLeft', { p: pct, t: fmtSecs(left) })}`; });
   const el = $('#fprog'); if (!el) return;
   el.classList.toggle('finished', !!p.end);
-  el.innerHTML = `<div class="fprog-top"><b>${p.end ? (failed ? 'Finished, with a few gaps' : 'All done') : 'Building the factory page'}</b>
-      <span>${p.end ? `in ${fmtSecs(elapsed)}` : `${doneN} of ${ts.length} steps done · about ${fmtSecs(left)} left`}</span></div>
+  el.innerHTML = `<div class="fprog-top"><b>${tx(p.end ? (failed ? 'progGaps' : 'progDone') : 'progRun')}</b>
+      <span>${p.end ? tx('progIn', { t: fmtSecs(elapsed) }) : tx('progSteps', { d: doneN, n: ts.length, t: fmtSecs(left) })}</span></div>
     <div class="fprog-bar"><i style="width:${Math.round(frac * 100)}%"></i></div>
-    <ol class="fprog-steps">${ts.map((t) => `<li class="${t.status}"><span class="fprog-ic">${t.status === 'done' ? '✓' : t.status === 'fail' ? '!' : t.status === 'run' ? '' : '·'}</span>${t.label}${t.key === 'pics' && t.total ? ` <small>${t.done} of ${t.total}</small>` : ''}</li>`).join('')}</ol>
-    ${p.end ? '' : `<p class="fprog-hint">${ts.some((t) => t.key === 'plan' && t.status !== 'done') ? 'The page appears as soon as the plan is ready; then you can look around while the pictures are painted.' : 'Look around while it works: the plan, floor plan and zone list are ready, and each picture appears as soon as it is painted.'}</p>`}`;
+    <ol class="fprog-steps">${ts.map((t) => `<li class="${t.status}"><span class="fprog-ic">${t.status === 'done' ? '✓' : t.status === 'fail' ? '!' : t.status === 'run' ? '' : '·'}</span>${t.label}${t.key === 'pics' && t.total ? ` <small>${tx('kOfN', { k: t.done, n: t.total })}</small>` : ''}</li>`).join('')}</ol>
+    ${p.end ? '' : `<p class="fprog-hint">${tx(ts.some((t) => t.key === 'plan' && t.status !== 'done') ? 'progHintPlan' : 'progHintRest')}</p>`}`;
 }
 let progTimer = null;
 function tickProgress() {
@@ -619,6 +626,11 @@ function tickProgress() {
 
 // ---------- point at a zone (plan or painted floor) → its before and after ----------
 function hoverZone(el, r, n) {
+  // keyboard: Tab to a zone shows its card beside it; Enter or Space toggles it
+  const at = () => { const b = el.getBoundingClientRect(); return { clientX: b.right, clientY: b.top + Math.min(b.height, 40) }; };
+  el.addEventListener('focus', () => showZoneTip(at(), r, n));
+  el.addEventListener('blur', hideZoneTip);
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const t = $('#ztip'); if (t && !t.hidden) hideZoneTip(); else showZoneTip(at(), r, n); } if (e.key === 'Escape') hideZoneTip(); });
   el.addEventListener('mouseenter', (e) => showZoneTip(e, r, n));
   el.addEventListener('mousemove', moveZoneTip);
   el.addEventListener('mouseleave', hideZoneTip);
@@ -639,14 +651,14 @@ function showZoneTip(e, r, n) {
   const esc = escapeHTML; const sg = stageOf(z.stage); const st = f.states?.[n - 1];
   const pic = (which) => {
     const t = st ? tile(r, stateKey(st, n - 1, which), '') : { cls: '', html: '<span>—</span>' };
-    return `<figure><div class="fbimg ${t.cls}">${t.html}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
+    return `<figure><div class="fbimg ${t.cls}">${t.html}</div><figcaption><small>${tx(which)}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
   };
   const t = zoneTip();
   t.style.setProperty('--c', sg.color); t.style.setProperty('--t', sg.tint);
   t.setAttribute('dir', $('#result').getAttribute('dir') || 'ltr');
-  t.innerHTML = `<header><span class="znum">${n}</span><b>${esc(z.name)}</b><small>${fmtM(z.length_m)} × ${fmtM(z.width_m)} m · ${z.staff} staff</small></header>
+  t.innerHTML = `<header><span class="znum">${n}</span><b>${esc(z.name)}</b><small>${fmtM(z.length_m)} × ${fmtM(z.width_m)} m · ${tx('staffN', { n: z.staff })}</small></header>
     ${st ? `<div class="fbarow">${pic('before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic('after')}</div>`
-      : `<p class="ztip-none">${r.factory_busy ? 'Working out what this zone takes in and sends out; its pictures follow.' : 'No before and after pictures for this plan yet: use the button under the zone list.'}</p>`}`;
+      : `<p class="ztip-none">${tx(r.factory_busy ? 'tipWorking' : 'tipNone')}</p>`}`;
   t.hidden = false; moveZoneTip(e);
 }
 function moveZoneTip(e) {
@@ -727,7 +739,7 @@ function floorPlanSVG(f, lay) {
   const Wpx = padL + PX + padR, Hpx = Math.round(padT + lay.W * s + padB);
   const ink = '#1d2433', muted = '#4a5263';
   const out = [];
-  out.push(`<svg class="fplan" viewBox="0 0 ${Wpx} ${Hpx}" width="${Wpx}" height="${Hpx}" role="img" aria-label="Factory floor plan, ${fmtM(lay.L)} by ${fmtM(lay.W)} metres" font-family="Nunito, system-ui, sans-serif">`);
+  out.push(`<svg class="fplan" viewBox="0 0 ${Wpx} ${Hpx}" width="${Wpx}" height="${Hpx}" role="img" direction="ltr" style="direction:ltr" aria-label="Factory floor plan, ${fmtM(lay.L)} by ${fmtM(lay.W)} metres" font-family="Nunito, system-ui, sans-serif">`);
   out.push(`<defs><marker id="fa" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="${ink}"/></marker>
     <pattern id="fhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#d9cdb2" stroke-width="2"/></pattern></defs>`);
   // building
@@ -736,13 +748,13 @@ function floorPlanSVG(f, lay) {
   for (let ri = 0; ri < lay.rows - 1; ri++) {
     const ay = WALL + lay.heights.slice(0, ri + 1).reduce((a, b) => a + b, 0) + AISLE * ri;
     out.push(`<rect x="${X(WALL)}" y="${Y(ay)}" width="${(lay.L - 2 * WALL) * s}" height="${AISLE * s}" fill="#fffaf0"/>`);
-    out.push(`<text x="${X(lay.L / 2)}" y="${Y(ay + AISLE / 2) + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="${muted}">forklift aisle · ${AISLE} m</text>`);
+    out.push(`<text x="${X(lay.L / 2)}" y="${Y(ay + AISLE / 2) + 4}" text-anchor="middle" font-size="11" font-style="italic" fill="${muted}">${tx('aisle', { m: AISLE })}</text>`);
   }
   // zones
   zones.forEach((z, i) => {
     const b = lay.boxes[i]; const st = stageOf(z.stage);
     const x = X(b.x), y = Y(b.y), w = b.w * s, h = b.h * s;
-    out.push(`<g class="fzg" data-zone="${i + 1}">`);
+    out.push(`<g class="fzg" data-zone="${i + 1}" tabindex="0" role="button" aria-label="${esc(`${tx('zoneN', { n: i + 1 })}: ${z.name}`)}">`);
     out.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" fill="${st.tint}" stroke="${st.color}" stroke-width="2"/>`);
     // machines, packed in shelves under the label band
     const top = y + 38, left = x + 6, right = x + w - 6, bottom = y + h - 6, sp = Math.max(4, 0.6 * s);
@@ -786,7 +798,7 @@ function floorPlanSVG(f, lay) {
     const dir = label === 'IN' ? 1 : -1; const outer = side === 'left' ? xw - 44 : xw + 44, inner = side === 'left' ? xw - 8 : xw + 8;
     const [from, to] = dir === 1 ? [outer, inner] : [inner, outer];
     out.push(`<line x1="${from}" y1="${yy}" x2="${to}" y2="${yy}" stroke="${label === 'IN' ? '#2b4c7e' : '#d2491f'}" stroke-width="3" marker-end="url(#fa)"/>`);
-    out.push(`<text x="${outer}" y="${yy - 8}" text-anchor="${side === 'left' ? 'start' : 'end'}" font-size="11" font-weight="900" fill="${label === 'IN' ? '#2b4c7e' : '#d2491f'}">${label}</text>`);
+    out.push(`<text x="${outer}" y="${yy - 8}" text-anchor="${side === 'left' ? 'start' : 'end'}" font-size="11" font-weight="900" fill="${label === 'IN' ? '#2b4c7e' : '#d2491f'}">${tx(label === 'IN' ? 'planIn' : 'planOut')}</text>`);
   };
   const first = lay.boxes[0], last = lay.boxes[zones.length - 1];
   door(first, 'left', 'IN');
@@ -801,7 +813,7 @@ function floorPlanSVG(f, lay) {
   // scale bar
   const unit = [5, 10, 20, 50, 100].find((u) => u * s >= 60) || 100; const sy = Y(lay.W) + 22;
   out.push(`<g fill="${ink}"><rect x="${X(0)}" y="${sy}" width="${unit * s / 2}" height="5"/><rect x="${X(0) + unit * s / 2}" y="${sy}" width="${unit * s / 2}" height="5" fill="#fbf4e4" stroke="${ink}" stroke-width="1"/></g>`);
-  out.push(`<text x="${X(0) + unit * s + 8}" y="${sy + 6}" font-size="11" fill="${muted}">${unit} m · ceiling ${fmtM(f.building.height_m)} m</text>`);
+  out.push(`<text x="${X(0) + unit * s + 8}" y="${sy + 6}" font-size="11" fill="${muted}">${tx('scaleCeiling', { u: unit, h: fmtM(f.building.height_m) })}</text>`);
   out.push('</svg>');
   return out.join('');
 }

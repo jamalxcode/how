@@ -6,7 +6,7 @@
   <title>How does it work? See anything pulled apart, with numbered parts | How</title>
 
   <!-- SEO -->
-  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works: one exploded view with numbered parts, a few short steps, real photos and a 3D model, in 17 languages. Free to browse, in your browser.">
+  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works, how a factory would make it, and what that would cost: one exploded view with numbered parts, a few short steps, real photos and a 3D model, in 17 languages. Free to browse, in your browser.">
   <meta name="author" content="Sala Company">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#fbf4e4">
@@ -23,7 +23,7 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://how.sala.company/">
   <meta property="og:title" content="How does it work? See anything pulled apart">
-  <meta property="og:description" content="Type a thing. See it pulled apart and numbered, the real thing in photos and 3D, in your language. Almost no reading.">
+  <meta property="og:description" content="Type a thing. See it pulled apart and numbered, how a factory would make it, and what that would cost — in your language.">
   <meta property="og:image" content="https://how.sala.company/og-image.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -32,7 +32,7 @@
   <!-- Twitter / X card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="How does it work? See anything pulled apart">
-  <meta name="twitter:description" content="Type a thing. See it pulled apart and numbered, the real thing in photos and 3D, in your language.">
+  <meta name="twitter:description" content="Type a thing. See it pulled apart and numbered, how a factory would make it, and what that would cost — in your language.">
   <meta name="twitter:image" content="https://how.sala.company/og-image.jpg">
 
   <!-- Structured data: the app, its site and the company (same shape as go.sala.company) -->
@@ -80,7 +80,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=33">
+  <link rel="stylesheet" href="style.css?v=34">
 </head>
 <body>
 
@@ -179,6 +179,12 @@
       <button type="button" class="chip" data-q="bicycle gears">🚲 Bicycle gears</button>
     </div>
 
+    <div class="hero-tabs" aria-label="See the scissors demo">
+      <button type="button" class="hero-tab" data-demo="exploded"><span class="ht-ic">⊕</span><b>Pulled apart</b><small>numbered parts, steps, photos, 3D</small></button>
+      <button type="button" class="hero-tab" data-demo="factory"><span class="ht-ic">🏭</span><b>Made in a factory</b><small>machines, people, a floor plan to scale</small></button>
+      <button type="button" class="hero-tab" data-demo="money"><span class="ht-ic">💰</span><b>Costed</b><small>set-up, running costs, payback</small></button>
+    </div>
+
     <section id="gallery-home" class="gallery-home" hidden aria-label="Browse answers">
       <h2 class="gallery-h">Browse <em>answers</em> <small>free, no sign-in</small></h2>
       <div class="ggrid" id="gallery-grid"></div>
@@ -221,21 +227,21 @@
     </header>
 
     <nav class="tabs" role="tablist" aria-label="Views">
-      <button role="tab" class="tab active" data-view="exploded" aria-selected="true">⊕ Pulled apart</button>
-      <button role="tab" class="tab" data-view="whole" aria-selected="false" id="tab-whole">◉ Whole</button>
-      <button role="tab" class="tab" data-view="photos" aria-selected="false">📷 Real thing</button>
-      <button role="tab" class="tab" data-view="model3d" aria-selected="false">🧊 3D</button>
+      <button role="tab" class="tab active" data-view="exploded" aria-selected="true" data-i18n="tab_exploded">⊕ Pulled apart</button>
+      <button role="tab" class="tab" data-view="whole" aria-selected="false" id="tab-whole" data-i18n="tab_whole">◉ Whole</button>
+      <button role="tab" class="tab" data-view="photos" aria-selected="false" data-i18n="tab_photos">📷 Real thing</button>
+      <button role="tab" class="tab" data-view="model3d" aria-selected="false" data-i18n="tab_3d">🧊 3D</button>
       <button role="tab" class="tab" data-view="factory" aria-selected="false" id="tab-factory">🏭 Factory</button>
-      <button role="tab" class="tab" data-view="money" aria-selected="false" id="tab-money">💰 Money</button>
+      <button role="tab" class="tab" data-view="money" aria-selected="false" id="tab-money" data-i18n="tab_money">💰 Money</button>
     </nav>
 
     <div class="view" id="view-picture">
       <div class="stage"><div class="picture" id="picture"></div></div>
-      <h3 class="list-h">Parts</h3>
+      <h3 class="list-h" data-i18n="parts">Parts</h3>
       <ol class="parts" id="parts"></ol>
-      <h3 class="list-h">Step by step</h3>
+      <h3 class="list-h" data-i18n="steps">Step by step</h3>
       <ol class="steps" id="steps"></ol>
-      <p class="fact" id="fact"></p>
+      <p class="fact" id="fact" data-label="Did you know?"></p>
     </div>
 
     <div class="view" id="view-photos" hidden>
@@ -258,9 +264,9 @@
 
     <footer class="result-foot">
       <span id="cost"></span>
-      <button type="button" class="btn btn-primary btn-sm" id="share">↗ Share</button>
-      <button type="button" class="link" id="redraw" title="Same words, new pictures">Paint again</button>
-      <button type="button" class="link" id="remake" title="Start over: new words and new pictures">Remake</button>
+      <button type="button" class="btn btn-primary btn-sm" id="share" data-i18n="share">↗ Share</button>
+      <button type="button" class="link" id="redraw" title="Same words, new pictures" data-i18n="paintAgain">Paint again</button>
+      <button type="button" class="link" id="remake" title="Start over: new words and new pictures" data-i18n="remake">Remake</button>
       <button type="button" class="link" id="flag">Something wrong?</button>
       <button type="button" class="btn btn-ghost btn-sm" id="gallery-add" hidden>Add to gallery</button>
       <button type="button" class="link" id="gallery-remove" hidden>Remove from gallery</button>
@@ -272,6 +278,7 @@
   <details class="about" id="about">
     <summary>What is How?</summary>
     <p>How is a picture book that draws itself. Ask how a thing works — a combustion engine, scissors, a can opener, a zipper, a refrigerator, bicycle gears, why planes fly, how a house is built — and you get one exploded view with the parts numbered, a few short steps, a fun fact, photos of the real thing from Wikipedia and a 3D model from Sketchfab to spin. It explains in 17 languages, including Arabic, Urdu and Persian laid out right to left, and for three audiences: a curious adult, a 10-year-old or an engineering student.</p>
+    <p>For anyone thinking of making it, two more tabs go further. <strong>Factory</strong> plans the plant in the order things happen — raw materials, parts made or bought, machines, assembly, quality checks, packing and shipping — with every step marked machine, people or both, a floor plan drawn to scale and before-and-after pictures of every zone, in three versions: hand-made, mixed and automated. <strong>Money</strong> puts approximate numbers on all three: land, people and salaries, equipment, power and running costs, and how long each takes to pay back at the markup you choose.</p>
     <p>It is in the spirit of the old <em>Tell Me Why</em> books: almost no reading, one big picture. The words are written by Claude and the picture is painted by OpenAI's image model, both paid for through your own OpenRouter account (a few cents a page). Every answer in the gallery, and every answer someone shares with you, opens free with no sign-in. Made by <a href="https://go.sala.company">Sala Company</a> in Kuwait; the <a href="https://github.com/jamalxcode/how">source is open</a>.</p>
   </details>
   <p>How is a free, static page: your OpenRouter account pays the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
@@ -316,10 +323,11 @@
   </form>
 </dialog>
 
-<script src="demo.js?v=23"></script>
-<script src="factory.js?v=10"></script>
-<script src="money.js?v=1"></script>
-<script src="app.js?v=35"></script>
+<script src="demo.js?v=24"></script>
+<script src="i18n.js?v=1"></script>
+<script src="factory.js?v=11"></script>
+<script src="money.js?v=2"></script>
+<script src="app.js?v=36"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

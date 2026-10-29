@@ -327,6 +327,14 @@ function countAnswer(title, how) {
     if (++tries < 20) setTimeout(send, 500);
   })();
 }
+// Which tabs people open (once per page and tab), next to the answers in GoatCounter.
+const tabsCounted = new Set();
+function countTab(view) {
+  const k = `${state.query}|${view}`; if (tabsCounted.has(k) || view === 'exploded') return; tabsCounted.add(k);
+  const gc = window.goatcounter; if (gc && typeof gc.count === 'function') { try { gc.count({ path: `${location.host}/tab/${view}`, title: `tab: ${view}`, event: true }); } catch {} }
+}
+// Open the scissors demo at one tab.
+function openDemo(view) { $('#lang').value = 'English'; state.pendingView = view; ask('scissors'); }
 function showError(msg) { stopLoading(); $('#error-msg').textContent = msg; $('#error').hidden = false; }
 
 async function ask(q, { force = false, reusePlan = null } = {}) {
@@ -399,7 +407,9 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   r.setAttribute('lang', langCode(result.lang));
   if (r.getAttribute('dir') === 'rtl') loadArabicFont();
 
-  $('#r-kind').textContent = result.kind === 'process' ? 'How it is done' : result.kind === 'refused' ? 'Sorry' : 'How it works';
+  $('#r-kind').textContent = result.kind === 'refused' ? 'Sorry' : tx(result.kind === 'process' ? 'howItIsDone' : 'howItWorks');
+  $$('[data-i18n]').forEach((el) => { el.textContent = tx(el.dataset.i18n); });
+  $('#fact').dataset.label = tx('didYouKnow');
   $('#r-title').textContent = result.title || q;
   $('#r-hook').textContent = result.hook || '';
   $('#fact').textContent = result.fun_fact || '';
@@ -407,14 +417,16 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   $('#hero-live').hidden = true;
   $('#cost').textContent = painting ? 'Painting…' : shared ? '' : free ? 'Free (already made)' : result.cost ? `This page cost $${result.cost.toFixed(3)}` : '';
   $('#gallery-add').textContent = 'Add to gallery';
-  $('#flag').textContent = 'Something wrong?'; $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
+  $('#flag').textContent = tx('somethingWrong'); $('#flag').disabled = false; $('#flag').hidden = result.kind === 'refused';
   renderAdmin();
 
   $('#tab-whole').hidden = !wholeUrl(result);
   $('#tab-factory').hidden = result.kind === 'refused';
   $('#tab-money').hidden = result.kind === 'refused';
   if (result.financials) result.financials = cleanMoney(result.financials);
-  $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = '🏭 Factory';
+  $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = tx('tab_factory');
+  const demoOf = typeof DEMO !== 'undefined' && (result.lang || 'English') === 'English' && DEMO[(result.title || '').toLowerCase()];
+  if (demoOf && demoOf !== result) { if (!result.factory && demoOf.factory) result.factory = JSON.parse(JSON.stringify(demoOf.factory)); if (!result.financials && demoOf.financials) result.financials = JSON.parse(JSON.stringify(demoOf.financials)); }
   if (result.factory) result.factory = cleanFactory(result.factory, (result.parts || []).length);
   // other versions of the factory: their pictures are stored under their own name unless said otherwise
   for (const [m, v] of Object.entries(result.factories || {})) { if (v.factory_where === undefined) v.factory_where = v.where ?? m; }
@@ -427,7 +439,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
     li.querySelector('.num').textContent = i + 1;
     li.querySelector('strong').textContent = p.name;
     li.querySelector('span:not(.num)').textContent = p.role;
-    const more = document.createElement('button'); more.type = 'button'; more.className = 'ask-more'; more.textContent = 'How does this work? →';
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'ask-more'; more.textContent = tx('howDoesThisWork');
     more.addEventListener('click', (e) => { e.stopPropagation(); followUp(p.name); });
     li.appendChild(more);
     li.addEventListener('click', () => pingPart(i + 1));
@@ -442,7 +454,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
     steps.appendChild(li);
   });
 
-  setView('exploded');
+  setView(state.pendingView || 'exploded'); state.pendingView = null;
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   loadPhotos(result.wikipedia_title || q);
   load3D(result.search_terms || q, result.m3d);
@@ -524,6 +536,7 @@ function loadArabicFont() {
   document.head.appendChild(l);
 }
 function setView(view) {
+  countTab(view);
   $$('.tab').forEach((t) => { const on = t.dataset.view === view; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
   const pic = view === 'exploded' || view === 'whole';
   if (pic) { pictureMode = view; renderPicture(); }
@@ -910,6 +923,7 @@ $('#share-svg').addEventListener('click', async () => {
   try { downloadBlob(await pictureBlob(), `${fileSlug()}.jpg`); shareStatus('Picture saved.'); } catch { shareStatus('Could not download the picture.'); }
 });
 $('#privacy').addEventListener('click', () => $('#privacy-dialog').showModal());
+$$('[data-demo]').forEach((b) => b.addEventListener('click', () => openDemo(b.dataset.demo)));
 
 (async function init() {
   state.key = store.get('or_key');

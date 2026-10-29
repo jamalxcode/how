@@ -19,7 +19,7 @@ It's a static site on GitHub Pages. Visitors sign in with their own OpenRouter a
 
 5. **🏭 Factory** comes in three versions, each its own plan: **✋ hand-made** (labour-heavy, simple tools), **🤝 mixed** and **🤖 automated** (robots; people only where they are actually needed). A switcher picks one; once two are planned a table compares people, automation, floor space, output, investment and cost to make one. What it would take to make the thing, in the order it happens: raw materials, which parts are made and which are bought, how each is made, assembly, quality control, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both, with the reason. A line diagram and an automation bar sum it up; a floor plan drawn to scale shows each zone's size and the machines' footprints, with a painted overview of the floor above it. One click, ~18¢ (Claude ~3¢, the floor ~4¢, the before/after pictures ~11¢); the scissors demo has one built in. Under the plan, **before → after** pictures show each zone's work as it comes in and as it leaves (a coil of steel → stamped blanks → hardened blanks…), made with the plan (an older plan gets a button): Claude describes each state, the image model paints each one as a small square, reusing a picture when one zone's input is the last zone's output. It is saved with the page, so share links carry it.
 
-6. **💰 Money.** Approximate financials for the three setups side by side, for a region you pick: land and building, people and monthly salaries, equipment, power, other running costs and materials (Claude estimates the inputs, ~2¢; the page does every sum). A markup slider shows the selling price, monthly profit and how long each setup takes to pay back, against the typical market price, and the markup needed to pay back in three years.
+6. **💰 Money.** Approximate financials for the three setups side by side, for a region you pick: land and building, people and monthly salaries, equipment, power, other running costs and materials (Claude estimates the inputs, ~2¢; the page does every sum). Every input can be changed — a few overall controls (output, salaries, power price, materials, equipment and running costs) and every line in the detail — and the page recalculates at once; numbers you type are exact, the AI's are shown as ranges. A markup slider shows the selling price, monthly profit and how long each setup takes to pay back, against the typical market price, and the markup needed to pay back in three years.
 
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic. The home page shows a page from the gallery under the headline and a **Browse answers** grid, free to open.
 
@@ -53,6 +53,8 @@ Question + language + audience
 | `index.html` | the page |
 | `style.css` | picture-encyclopedia look (cream paper, ink lines), dark mode, RTL, mobile |
 | `app.js` | sign-in and keys, the prompt and schema, painting, storing, sharing, gallery, Wikipedia and Sketchfab |
+| `i18n.js` | the page's own labels in all 17 languages (the AI writes the content itself); `tx('key')` picks the page's language |
+| `scripts/make-gallery.mjs`, `.github/workflows/gallery.yml` | makes complete gallery pages (page, three factory versions, money) on the live site; run from the Actions tab |
 | `money.js` | the Money tab: the estimate's prompt and schema, the sums, cards, payback and cost bars |
 | `factory.js` | the Factory tab: the plan's prompt and schema, the line diagram, the to-scale floor plan, the factory part of the report |
 | `demo.js`, `demo-scissors.jpg` | the built-in demo page, with its factory |
@@ -72,3 +74,7 @@ Question + language + audience
 ## Licence
 
 MIT. Photos and 3D models belong to their authors under their own licences.
+
+## Filling the gallery
+
+`scripts/make-gallery.mjs` opens the live site in a headless browser and, for each thing, makes the page, plans all three factory versions, estimates the money and adds the result to the gallery — about 70¢ and 5–10 minutes per thing. To run it on GitHub: add the repository secrets `OPENROUTER_KEY` and `HOW_ADMIN_SECRET`, then Actions → **Make gallery pages** → Run workflow (it stops starting new things once `max_spend` dollars are spent). The link service must be running the current `worker/worker.js`, or the factory and money parts are not kept.

@@ -1,0 +1,37 @@
+# Makes complete gallery pages on the live site (page, three factory versions, money) and adds them
+# to the gallery. Run it from the Actions tab: "Make gallery pages" → Run workflow.
+# Needs two repository secrets: OPENROUTER_KEY (pays for the AI) and HOW_ADMIN_SECRET (the link
+# service's admin secret, as used with #admin=…). The link service must run the current worker.js.
+name: Make gallery pages
+on:
+  workflow_dispatch:
+    inputs:
+      items:
+        description: Things to make, comma separated (empty = the 18 in scripts/make-gallery.mjs)
+        required: false
+        default: ''
+      region:
+        description: Region for the Money tab
+        required: false
+        default: Gulf (Kuwait, UAE, Saudi Arabia)
+      max_spend:
+        description: Stop starting new items after this many US dollars
+        required: false
+        default: '15'
+permissions: { contents: read }
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm install --no-save --no-package-lock playwright@1.48.2 && npx playwright install --with-deps chromium
+      - run: node scripts/make-gallery.mjs
+        env:
+          OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          HOW_ADMIN_SECRET: ${{ secrets.HOW_ADMIN_SECRET }}
+          ITEMS: ${{ inputs.items }}
+          REGION: ${{ inputs.region }}
+          MAX_SPEND: ${{ inputs.max_spend }}
