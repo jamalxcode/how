@@ -412,6 +412,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
 
   $('#tab-whole').hidden = !wholeUrl(result);
   $('#tab-factory').hidden = result.kind === 'refused';
+  $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = '🏭 Factory';
   if (result.factory) result.factory = cleanFactory(result.factory, (result.parts || []).length);
   pictureMode = 'exploded';
 

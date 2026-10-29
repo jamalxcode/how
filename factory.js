@@ -329,7 +329,7 @@ function renderFactory() {
   const esc = escapeHTML; const f = r.factory;
   if (r.progress && !r.progress.end) tickProgress();
   if (r.factory_busy === 'plan') {
-    box.innerHTML = `${progressHTML(r)}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p></div>`;
+    box.innerHTML = `${progressHTML(r)}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p>${progButton('Planning…')}</div>`;
     drawProgress(r);
     return;
   }
@@ -437,7 +437,7 @@ function ghostLine(busy) {
 function statesHTML(r, f) {
   const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states' || r.factory_busy === 'all';
   const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before'), stateKey(st, i, 'after')].filter((k) => !stateUrl(r, k)).length, 0) : 0;
-  const button = busy ? ''
+  const button = busy ? progButton(sts.length ? 'Painting…' : 'Describing each zone…')
     : !sts.length || missing ? (state.key
       ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${sts.length ? 'Paint the missing pictures' : 'Show what goes in and comes out of each zone'} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
       : `<p class="hint fpaint">Sign in to OpenRouter (top right) to paint a before and after picture for every zone (${STATES_COST}).</p>`) : '';
@@ -458,7 +458,8 @@ function statesHTML(r, f) {
 function floorHTML(r) {
   const esc = escapeHTML; const f = r.factory; const url = factoryUrl(r);
   if (url) return `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(url)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>Painted overview: an impression, not to scale. Point at (or tap) a number to see what that zone does.</figcaption></figure>`;
-  if (r.factory_busy === 'paint' || r.factory_busy === 'all') return `<div class="stage ffloor-wait"><div class="painting">${loaderSVG()}<p>Painting the factory floor</p></div></div>`;
+  if (r.factory_busy === 'paint') return progButton('Painting the floor…');
+  if (r.factory_busy === 'all') return `<div class="stage ffloor-wait"><div class="painting">${loaderSVG()}<p>Painting the factory floor</p></div></div>`;
   return f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : '';
 }
 
@@ -487,6 +488,7 @@ function endProgress(r) {
   r.progress.tasks.forEach((t) => { if (t.status === 'run' || t.status === 'wait') t.status = 'fail'; });
   drawProgress(r);
   setTimeout(() => { if (r.progress?.end) { r.progress = null; if (state.result === r) $('#fprog')?.remove(); } }, 6000);
+  const tab = $('#tab-factory'); if (tab && state.result === r) { tab.classList.remove('prog'); tab.textContent = '🏭 Factory'; }
 }
 // Seconds left on one task; the floor and the before/after pictures run side by side, after the plan.
 function taskLeft(t, r) {
@@ -501,15 +503,23 @@ function taskLeft(t, r) {
   return t.est;
 }
 function fmtSecs(s) { s = Math.max(0, Math.round(s)); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`; }
+// A button that has been pressed turns into a bar that fills as the work goes on.
+function progButton(label) { return `<p class="fpaint"><button type="button" class="btn btn-prog" data-prog="${label}" disabled><span class="bp-text">${label}</span></button></p>`; }
 function progressHTML(r) { return r.progress ? '<div class="fprog" id="fprog" aria-live="polite"></div>' : ''; }
 function drawProgress(r) {
-  const el = $('#fprog'); const p = r.progress; if (!el || !p || state.result !== r) return;
+  const p = r.progress; if (!p || state.result !== r) return;
   const ts = p.tasks; const lane = (k) => ts.filter((t) => t.lane === k).reduce((a, t) => a + taskLeft(t, r), 0);
   const left = lane(0) + Math.max(lane(1), lane(2));
   const elapsed = ((p.end || Date.now()) - p.t0) / 1000;
   const frac = p.end ? 1 : Math.min(0.97, elapsed / (elapsed + left));
   const doneN = ts.filter((t) => t.status === 'done').length;
   const failed = ts.some((t) => t.status === 'fail');
+  const pct = `${Math.round(frac * 100)}%`;
+  // the Factory tab and the button that started it fill up too
+  const tab = $('#tab-factory');
+  if (tab) { tab.classList.toggle('prog', !p.end); tab.style.setProperty('--prog', pct); tab.textContent = p.end ? '🏭 Factory' : `🏭 Factory ${pct}`; }
+  $$('[data-prog]').forEach((b) => { b.style.setProperty('--prog', pct); b.querySelector('.bp-text').textContent = p.end ? 'Done' : `${b.dataset.prog} ${pct} · about ${fmtSecs(left)} left`; });
+  const el = $('#fprog'); if (!el) return;
   el.classList.toggle('finished', !!p.end);
   el.innerHTML = `<div class="fprog-top"><b>${p.end ? (failed ? 'Finished, with a few gaps' : 'All done') : 'Building the factory page'}</b>
       <span>${p.end ? `in ${fmtSecs(elapsed)}` : `${doneN} of ${ts.length} steps done · about ${fmtSecs(left)} left`}</span></div>
