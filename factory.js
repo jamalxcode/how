@@ -56,7 +56,7 @@ Plan a mid-size plant with a sensible output, stated in "output" ("about 12,000 
 
 "materials": 3–7 raw materials. name with grade where it matters ("Stainless steel 420, 2 mm strip"); form as delivered ("coils", "pellets in 25 kg bags"); per_unit is the rough amount in one finished product ("38 g"); parts it becomes.
 "components": one entry per numbered part: make true if made in-house; process ≤ 12 words.
-"steps": 12–24 steps in time order, every stage at least once. title ≤ 5 words; text ≤ 20 words. "who": "machine" (fully automated), "human" (needs people: judgement, dexterity, feel, low volume) or "both" (people load, set or watch a machine). "why" ≤ 10 words, the reason for that choice. "parts": part numbers involved (may be empty). "zone": number of the zone where it happens.
+"steps": 12–20 steps in time order, every stage at least once. title ≤ 5 words; text ≤ 20 words. "who": "machine" (fully automated), "human" (needs people: judgement, dexterity, feel, low volume) or "both" (people load, set or watch a machine). "why" ≤ 10 words, the reason for that choice. "parts": part numbers involved (may be empty). "zone": number of the zone where it happens.
 "zones": 6–10 areas of the factory floor in the order material flows through them (1 = receiving, last = shipping dock). length_m and width_m: realistic floor size in metres (usually 6–40). "machines": the main equipment in it, 1–4 kinds, each with count and its real footprint length_m × width_m in metres. "staff": people per shift.
 "building": a rectangle that holds all zones plus aisles; height_m is the clear ceiling height. "workers_per_shift" ≈ sum of zone staff; "shifts" 1–3.
 "summary" ≤ 28 words: the whole journey from raw material to truck.
@@ -103,6 +103,19 @@ function cleanStates(v, nZones) {
 
 const stateKey = (st, i, which) => (which === 'before' && st.before_from ? `z${st.before_from}a` : `z${i + 1}${which === 'before' ? 'b' : 'a'}`);
 function stateUrl(r, key) { return r.state_imgs?.[key] || (r.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${key}` : ''); }
+// A factory plan is a long answer; for a big product it can run past the limit and arrive cut off,
+// which reads as broken JSON. Then ask once more, with more room and a request to be brief.
+async function askLongJSON(opts) {
+  try { return await askJSON(opts); } catch (e) {
+    if (e?.name === 'AbortError' || !/could not read/.test(e.message || '')) throw e;
+    try {
+      return await askJSON({ ...opts, maxTokens: opts.maxTokens + 8000, messages: [...opts.messages, { role: 'system', content: 'Your last answer was cut off. Keep every text at or under its word limit and stay at the low end of every count, so the whole JSON object fits.' }] });
+    } catch (e2) {
+      if (e2?.name === 'AbortError' || !/could not read/.test(e2.message || '')) throw e2;
+      throw new Error('The factory plan came back cut off twice. Press “Plan the factory” to try again (you are only charged for what the AI wrote).');
+    }
+  }
+}
 function factoryUrl(r) { return r.image_factory || (r.has_factory_img && r.image_id ? `${LINKS_API}/img/${r.image_id}/factory` : ''); }
 
 async function makeFactory() {
@@ -112,7 +125,7 @@ async function makeFactory() {
   r.factory_error = ''; r.factory_busy = 'plan'; renderFactoryIfShown(r);
   const lang = r.lang || $('#lang').value;
   try {
-    const f = await askJSON({ model: PLAN_MODEL, maxTokens: 7000, schema: FACTORY_SCHEMA, signal: ctrl.signal, messages: [
+    const f = await askLongJSON({ model: PLAN_MODEL, maxTokens: 12000, schema: FACTORY_SCHEMA, signal: ctrl.signal, messages: [
       { role: 'system', content: factoryPrompt(lang, $('#level').value, r) },
       { role: 'user', content: `Plan the factory for: ${r.title}` },
     ] });
@@ -198,7 +211,7 @@ async function paintStates(r, signal) {
   const f = r.factory; let failed = 0;
   {
     if (!f.states?.length) {
-      const j = await askJSON({ model: PLAN_MODEL, maxTokens: 6000, schema: STATES_SCHEMA, signal, messages: [
+      const j = await askLongJSON({ model: PLAN_MODEL, maxTokens: 10000, schema: STATES_SCHEMA, signal, messages: [
         { role: 'system', content: statesPrompt(r.lang || $('#lang').value, $('#level').value, r) },
         { role: 'user', content: `Before and after for each zone of the ${r.title} factory.` },
       ] });
