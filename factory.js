@@ -86,10 +86,23 @@ function cleanFactory(f, nParts) {
     building: { length_m: n(f.building?.length_m, 5, 600), width_m: n(f.building?.width_m, 5, 400), height_m: n(f.building?.height_m, 2, 40) },
     materials: list(f.materials, 10, (m) => ({ name: s(m.name, 80), form: s(m.form, 80), per_unit: s(m.per_unit, 40), parts: partNums(m.parts) })),
     components: list(f.components, 20, (c) => ({ part: Math.round(n(c.part, 0, nParts)), make: !!c.make, process: s(c.process, 160) })).filter((c) => c.part >= 1),
-    steps, zones, floor_prompt: s(f.floor_prompt, 2000),
+    steps, zones, floor_prompt: s(f.floor_prompt, 2000), states: cleanStates(f.states, zones.length),
   };
 }
+// Before → after for each zone, in zone order. before_from names an earlier zone whose "after" this
+// zone's "before" is (the work just moved on), so that picture is reused rather than painted again.
+function cleanStates(v, nZones) {
+  const s = (x, n) => (typeof x === 'string' ? x.slice(0, n) : '');
+  const look = (o) => ({ label: s(o?.label, 80), prompt: s(o?.prompt, 600) });
+  return (Array.isArray(v) ? v.slice(0, nZones) : []).map((st, i) => {
+    st = st && typeof st === 'object' ? st : {};
+    const k = Math.round(Number(st.before_from));
+    return { change: s(st.change, 160), before_from: k >= 1 && k <= i ? k : 0, before: look(st.before), after: look(st.after) };
+  });
+}
 
+const stateKey = (st, i, which) => (which === 'before' && st.before_from ? `z${st.before_from}a` : `z${i + 1}${which === 'before' ? 'b' : 'a'}`);
+function stateUrl(r, key) { return r.state_imgs?.[key] || (r.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${key}` : ''); }
 function factoryUrl(r) { return r.image_factory || (r.has_factory_img && r.image_id ? `${LINKS_API}/img/${r.image_id}/factory` : ''); }
 
 async function makeFactory() {
@@ -129,8 +142,85 @@ async function paintFloor() {
   if (r.image_factory) await saveFactory(r);
 }
 
+// ---------- before → after, zone by zone ----------
+const STATES_COST = '~12¢';
+const STATE_STYLE = "Vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, one clear subject centred with generous margins, three-quarter view, evenly lit. No machines, no people, no hands. No text, words, letters or numbers anywhere.";
+const LOOK = obj({ label: str, prompt: str });
+const STATES_SCHEMA = { type: 'json_schema', json_schema: { name: 'states', strict: true, schema: obj({
+  zones: { type: 'array', items: obj({ before: LOOK, after: LOOK, change: str, before_from: int }) },
+}) } };
+function statesPrompt(lang, level, r) {
+  const f = r.factory;
+  const zones = f.zones.map((z, i) => {
+    const steps = f.steps.filter((s) => s.zone === i + 1).map((s) => s.title).join('; ');
+    return `${i + 1}. ${z.name_en || z.name} (machines: ${z.machines.map((m) => m.name).join(', ') || 'none'}${steps ? `; work done here: ${steps}` : ''})`;
+  }).join('\n');
+  return `You illustrate a factory zone by zone for ${level}, so the reader SEES what each zone does to the work. Answer as JSON only.
+Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${(r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ')}.
+For EACH zone below, in the same order, one entry: "before" is the work as it ENTERS the zone, "after" as it LEAVES.
+"label" in ${lang}, ≤ 8 words ("Steel strip on a 1-tonne coil"). "change" in ${lang}, ≤ 14 words: what the zone does to it.
+"before_from": the number of an earlier zone whose "after" is exactly this zone's "before" (the work just moved on from there), otherwise 0 (the work starts here, like goods arriving or bought-in parts). Zone 1 is always 0: its before is what the trucks deliver.
+"prompt" (English, 25–50 words): only the object or objects as they look at that moment — real material, colour, finish, shape and how many (one blank, a stack of 20, a sealed carton) — so before and after are clearly different. Same viewpoint and scale for the same object across zones.
+Zones:
+${zones}`;
+}
+// Small squares are plenty for these, and keep the stored page small.
+async function shrink(dataUrl, max = 512) {
+  const img = new Image(); img.src = dataUrl; await img.decode();
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+async function inPool(items, n, fn) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) await fn(items[next++]); }));
+}
+async function makeStates() {
+  const r = state.result; const f = r?.factory; if (!f || r.factory_busy) return;
+  if (!state.key) { showError('To paint the before and after pictures, sign in to OpenRouter first (top right).'); $('#signin').focus(); return; }
+  const ctrl = new AbortController(); r.factory_ctrl = ctrl;
+  r.factory_busy = 'states'; r.factory_error = ''; renderFactoryIfShown(r);
+  let failed = 0;
+  try {
+    if (!f.states?.length) {
+      const j = await askJSON({ model: PLAN_MODEL, maxTokens: 6000, schema: STATES_SCHEMA, signal: ctrl.signal, messages: [
+        { role: 'system', content: statesPrompt(r.lang || $('#lang').value, $('#level').value, r) },
+        { role: 'user', content: `Before and after for each zone of the ${r.title} factory.` },
+      ] });
+      f.states = cleanStates(j.zones, f.zones.length);
+      renderFactoryIfShown(r);
+    }
+    const jobs = [];
+    f.states.forEach((st, i) => {
+      jobs.push({ key: stateKey(st, i, 'after'), prompt: st.after.prompt });
+      if (!st.before_from) jobs.push({ key: stateKey(st, i, 'before'), prompt: st.before.prompt });
+    });
+    r.state_imgs = r.state_imgs || {};
+    await inPool(jobs.filter((j) => j.prompt && !stateUrl(r, j.key)), 4, async (j) => {
+      try {
+        r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, ctrl.signal, { size: '1024x1024', quality: 'medium' }));
+        fillState(r, j.key);
+      } catch (e) { if (e?.name === 'AbortError') throw e; failed++; }
+    });
+  } catch (e) {
+    if (e?.name === 'AbortError') { r.factory_busy = null; return; }
+    r.factory_error = e.message;
+  }
+  if (failed) r.factory_error = `${failed} picture${failed > 1 ? 's' : ''} could not be painted. Press the button again to paint ${failed > 1 ? 'them' : 'it'}.`;
+  r.factory_busy = null;
+  renderFactoryIfShown(r);
+  await saveFactory(r);
+}
+// Put a finished picture in place without redrawing the whole tab.
+function fillState(r, key) {
+  if (state.result !== r) return;
+  const url = stateUrl(r, key);
+  $$(`[data-skey="${key}"]`).forEach((el) => { el.classList.remove('waiting'); el.innerHTML = ''; const img = document.createElement('img'); img.src = url; img.alt = el.dataset.alt || ''; img.decoding = 'async'; el.appendChild(img); });
+}
+
 // Store the page again with its factory, so the share link and the gallery carry it. The existing
-// pictures travel by id; only the new floor picture is sent. A link service that predates the
+// pictures travel by id; only new ones (the floor, before/after) are sent. A link service that predates the
 // factory drops it (and says nothing about it), so then the plan is kept in this browser only.
 async function saveFactory(r) {
   if (!r.factory || (!r.image_id && !r.image)) { cacheFactory(r); return; }
@@ -141,6 +231,8 @@ async function saveFactory(r) {
     if (j?.id && j.factory) {
       r.image_id = j.id; r.image = null; r.image_whole = null;
       if (r.image_factory) { r.has_factory_img = true; r.image_factory = null; }
+      const keys = [...new Set([...(r.state_keys || []), ...Object.keys(r.state_imgs || {})])];
+      if (keys.length && j.states >= keys.length) { r.state_keys = keys; r.state_imgs = {}; }
       if (state.result === r) {
         state.shortId = j.id;
         if (/\/s=/.test(location.hash)) history.replaceState(null, '', `#${encodeURIComponent(fileSlug())}/s=${j.id}`);
@@ -240,6 +332,9 @@ function renderFactory() {
         <td class="nw">${z.staff}</td></tr>`; }).join('')}</tbody>
     </table></div>
 
+    <h3 class="list-h">Zone by zone: before → after</h3>
+    ${statesHTML(r, f)}
+
     <h3 class="list-h">Step by step, from raw material to truck</h3>
     <div class="ftimeline">${STAGES.map((st, si) => {
       const ss = f.steps.filter((s) => s.stage === st.key);
@@ -266,11 +361,33 @@ function renderFactory() {
   $$('[data-go]', box).forEach((b) => b.addEventListener('click', () => $(`#fstage-${b.dataset.go}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
   $$('.pdot', box).forEach((b) => b.addEventListener('click', () => { setView('exploded'); setTimeout(() => pingPart(Number(b.dataset.part)), 60); }));
   $('#factory-paint')?.addEventListener('click', paintFloor);
+  $('#factory-states')?.addEventListener('click', makeStates);
 }
 
 // The seven stations without numbers: on the intro, and (with a moving belt) while the plan is made.
 function ghostLine(busy) {
   return `<ol class="fline fline-ghost${busy ? ' busy' : ''}" aria-hidden="true">${STAGES.map((st) => `<li style="--c:${st.color};--t:${st.tint}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b></li>`).join('')}</ol>`;
+}
+
+function statesHTML(r, f) {
+  const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states';
+  const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before'), stateKey(st, i, 'after')].filter((k) => !stateUrl(r, k)).length, 0) : 0;
+  const button = busy ? ''
+    : !sts.length || missing ? (state.key
+      ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${sts.length ? 'Paint the missing pictures' : 'Show what goes in and comes out of each zone'} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
+      : `<p class="hint fpaint">Sign in to OpenRouter (top right) to paint a before and after picture for every zone (${STATES_COST}).</p>`) : '';
+  if (!sts.length) return busy ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Working out what each zone does to the work</p></div></div>` : button;
+  const pic = (st, i, which) => {
+    const key = stateKey(st, i, which); const url = stateUrl(r, key); const lab = st[which].label;
+    return `<figure><div class="fbimg${url ? '' : busy ? ' waiting' : ''}" data-skey="${key}" data-alt="${esc(lab)}">${url ? `<img src="${esc(url)}" alt="${esc(lab)}" decoding="async">` : busy ? '<span>Painting…</span>' : '<span>—</span>'}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(lab)}</figcaption></figure>`;
+  };
+  return `${button}<div class="fba">${f.zones.map((z, i) => {
+    const st = sts[i]; if (!st) return ''; const sg = stageOf(z.stage);
+    return `<article class="fbacard" style="--c:${sg.color};--t:${sg.tint}">
+      <header><span class="znum">${i + 1}</span><b>${esc(z.name)}</b></header>
+      <div class="fbarow">${pic(st, i, 'before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic(st, i, 'after')}</div>
+    </article>`;
+  }).join('')}</div>`;
 }
 
 function loaderSVG() {

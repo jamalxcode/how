@@ -83,7 +83,7 @@ function loadCache() { try { return JSON.parse(store.get(CACHE_KEY) || '{}'); } 
 function cacheGet(k) { return loadCache()[k] || null; }
 function cachePut(k, result) {
   const c = loadCache();
-  c[k] = { ...result, image: result.image_id ? undefined : result.image, image_whole: result.image_id ? undefined : result.image_whole, image_factory: result.image_id && result.has_factory_img ? undefined : result.image_factory, at: Date.now() }; // pictures live in the link service
+  c[k] = { ...result, image: result.image_id ? undefined : result.image, image_whole: result.image_id ? undefined : result.image_whole, image_factory: result.image_id && result.has_factory_img ? undefined : result.image_factory, state_imgs: result.image_id && result.state_keys?.length && !Object.keys(result.state_imgs || {}).length ? undefined : result.state_imgs, at: Date.now() }; // pictures live in the link service
   const keys = Object.keys(c).sort((a, b) => c[b].at - c[a].at);
   keys.slice(CACHE_MAX).forEach((old) => delete c[old]);
   store.set(CACHE_KEY, JSON.stringify(c));
@@ -223,12 +223,12 @@ async function callAI({ model, messages, maxTokens, responseFormat, signal }) {
 }
 
 // ---------- step 2: the picture, painted by OpenAI's image model through OpenRouter ----------
-async function paint(prompt, signal) {
+async function paint(prompt, signal, { size = IMAGE_SIZE, quality = $('#quality').value } = {}) {
   return withRetry(async () => {
     const res = await fetch(`${OPENROUTER}/api/v1/images`, {
       method: 'POST', signal,
       headers: { Authorization: `Bearer ${state.key}`, 'Content-Type': 'application/json', 'HTTP-Referer': callbackUrl(), 'X-Title': APP_TITLE },
-      body: JSON.stringify({ model: IMAGE_MODEL, prompt, size: IMAGE_SIZE, quality: $('#quality').value, output_format: 'jpeg', output_compression: 85, n: 1 }),
+      body: JSON.stringify({ model: IMAGE_MODEL, prompt, size, quality, output_format: 'jpeg', output_compression: 85, n: 1 }),
     });
     if (!res.ok) {
       let msg = `${res.status}`;
@@ -646,10 +646,10 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
-  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined };
+  return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined, state_images: state_imgs && Object.keys(state_imgs).length ? state_imgs : undefined, state_keys: state_keys?.length ? state_keys : undefined };
 }
 async function shareUrl() {
   const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || location.protocol === 'file:';
@@ -819,7 +819,7 @@ async function openStored(id, title, { shared = false } = {}) {
     if (!res.ok) throw new Error();
     const r = await res.json();
     const q = r.q || r.title; delete r.q;
-    r.image = undefined; r.image_whole = undefined; r.image_factory = undefined; r.image_id = id; // pictures are served by the link service
+    r.image = undefined; r.image_whole = undefined; r.image_factory = undefined; r.state_imgs = undefined; r.image_id = id; // pictures are served by the link service
     $('#q').value = q; if (r.lang && $(`#lang option[value="${CSS.escape(r.lang)}"]`)) $('#lang').value = r.lang;
     location.hash = `${encodeURIComponent((r.title || q).replace(/[^\p{L}\p{N}-]+/gu, '-').toLowerCase())}/s=${id}`;
     state.shortId = id;
@@ -874,7 +874,7 @@ $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
 $$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
-$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {}, image_factory: null, has_factory_img: false } : null }));
+$('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {}, image_factory: null, has_factory_img: false, state_imgs: undefined, state_keys: undefined } : null }));
 $('#remake').addEventListener('click', () => ask(state.query, { force: true }));
 $('#share').addEventListener('click', openShare);
 $('#gallery-add').addEventListener('click', galleryAdd);
