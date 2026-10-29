@@ -23,7 +23,7 @@ const WHO = {
   human: { icon: '✋', label: 'People' },
 };
 const FACTORY_STYLE = "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, evenly lit, centred with margins, nothing cropped. No text, words or letters anywhere except the number badges.";
-const FACTORY_COST = '~6¢';
+const FACTORY_COST = '~18¢';
 
 // ---------- the plan, from Claude ----------
 const obj = (properties) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
@@ -118,9 +118,14 @@ async function makeFactory() {
     ] });
     r.factory = cleanFactory(f, (r.parts || []).length);
     r.image_factory = null; r.has_factory_img = false;
-    r.factory_busy = r.factory?.applicable && r.factory.floor_prompt ? 'paint' : null;
+    r.factory_busy = r.factory?.applicable ? 'all' : null;
     renderFactoryIfShown(r);
-    if (r.factory_busy === 'paint') r.image_factory = await paint(r.factory.floor_prompt, ctrl.signal);
+    if (r.factory_busy) {
+      const floor = r.factory.floor_prompt ? paint(r.factory.floor_prompt, ctrl.signal).then((img) => { r.image_factory = img; renderFactoryIfShown(r); }) : Promise.resolve();
+      const [a, b] = await Promise.allSettled([floor, paintStates(r, ctrl.signal)]);
+      if ([a, b].some((x) => x.status === 'rejected' && x.reason?.name === 'AbortError')) throw new DOMException('Cancelled', 'AbortError');
+      r.factory_error = [a.status === 'rejected' ? `The floor picture failed: ${a.reason?.message}` : '', b.value || (b.status === 'rejected' ? b.reason?.message : '')].filter(Boolean).join(' ');
+    }
   } catch (e) {
     if (e?.name === 'AbortError') { r.factory_busy = null; return; }
     if (!r.factory) r.factory_error = e.message;
@@ -181,10 +186,19 @@ async function makeStates() {
   if (!state.key) { showError('To paint the before and after pictures, sign in to OpenRouter first (top right).'); $('#signin').focus(); return; }
   const ctrl = new AbortController(); r.factory_ctrl = ctrl;
   r.factory_busy = 'states'; r.factory_error = ''; renderFactoryIfShown(r);
-  let failed = 0;
-  try {
+  try { r.factory_error = await paintStates(r, ctrl.signal); }
+  catch (e) { if (e?.name === 'AbortError') { r.factory_busy = null; return; } r.factory_error = e.message; }
+  r.factory_busy = null;
+  renderFactoryIfShown(r);
+  await saveFactory(r);
+}
+// Describe each zone's before and after (once), then paint every picture still missing.
+// Returns a note about pictures that failed, or ''.
+async function paintStates(r, signal) {
+  const f = r.factory; let failed = 0;
+  {
     if (!f.states?.length) {
-      const j = await askJSON({ model: PLAN_MODEL, maxTokens: 6000, schema: STATES_SCHEMA, signal: ctrl.signal, messages: [
+      const j = await askJSON({ model: PLAN_MODEL, maxTokens: 6000, schema: STATES_SCHEMA, signal, messages: [
         { role: 'system', content: statesPrompt(r.lang || $('#lang').value, $('#level').value, r) },
         { role: 'user', content: `Before and after for each zone of the ${r.title} factory.` },
       ] });
@@ -199,18 +213,12 @@ async function makeStates() {
     r.state_imgs = r.state_imgs || {};
     await inPool(jobs.filter((j) => j.prompt && !stateUrl(r, j.key)), 4, async (j) => {
       try {
-        r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, ctrl.signal, { size: '1024x1024', quality: 'medium' }));
+        r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'medium' }));
         fillState(r, j.key);
       } catch (e) { if (e?.name === 'AbortError') throw e; failed++; }
     });
-  } catch (e) {
-    if (e?.name === 'AbortError') { r.factory_busy = null; return; }
-    r.factory_error = e.message;
   }
-  if (failed) r.factory_error = `${failed} picture${failed > 1 ? 's' : ''} could not be painted. Press the button again to paint ${failed > 1 ? 'them' : 'it'}.`;
-  r.factory_busy = null;
-  renderFactoryIfShown(r);
-  await saveFactory(r);
+  return failed ? `${failed} before/after picture${failed > 1 ? 's' : ''} could not be painted. Press “Paint the missing pictures” to try again.` : '';
 }
 // Put a finished picture in place without redrawing the whole tab.
 function fillState(r, key) {
@@ -273,7 +281,7 @@ function renderFactory() {
     box.innerHTML = `<div class="fintro">
       ${ghostLine(false)}
       <h3>How would you make ${esc(r.title || 'this')}?</h3>
-      <p>See what a factory for it would need, in the order it happens: the raw materials, which parts are made and which are bought, the machines, assembly, quality checks, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both, and you get a factory floor plan drawn to scale.</p>
+      <p>See what a factory for it would need, in the order it happens: the raw materials, which parts are made and which are bought, the machines, assembly, quality checks, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both. You also get a factory floor plan drawn to scale, and before and after pictures for every zone.</p>
       ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
       ${state.key ? `<button type="button" class="btn btn-primary" id="factory-go">🏭 Plan the factory <small>${FACTORY_COST}</small></button>`
         : `<button type="button" class="btn btn-ghost" id="factory-signin">Sign in to OpenRouter to plan it (${FACTORY_COST})</button><p class="hint">Or open the free <button type="button" class="link" id="factory-demo">scissors demo</button>, which has a factory built in.</p>`}
@@ -319,7 +327,7 @@ function renderFactory() {
 
     <h3 class="list-h">Factory floor</h3>
     ${floorPic ? `<figure class="ffig"><div class="stage"><img src="${esc(floorPic)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div><figcaption>Painted overview: an impression, not to scale. Numbers are the zones below.</figcaption></figure>`
-      : r.factory_busy === 'paint' ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Painting the factory floor (20–40 s)</p></div></div>`
+      : r.factory_busy === 'paint' || r.factory_busy === 'all' ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Painting the factory floor (20–40 s)</p></div></div>`
       : f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : ''}
     ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
     ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>Floor plan drawn to scale from the zone sizes. Material flows along the arrows, from IN to OUT; letters are machines, listed below.<span class="fswipe"> Swipe sideways to see all of it.</span></figcaption></figure>` : ''}
@@ -370,7 +378,7 @@ function ghostLine(busy) {
 }
 
 function statesHTML(r, f) {
-  const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states';
+  const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states' || r.factory_busy === 'all';
   const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before'), stateKey(st, i, 'after')].filter((k) => !stateUrl(r, k)).length, 0) : 0;
   const button = busy ? ''
     : !sts.length || missing ? (state.key
