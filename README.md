@@ -55,13 +55,14 @@ Question + language + audience
 | `app.js` | sign-in and keys, the prompt and schema, painting, storing, sharing, gallery, Wikipedia and Sketchfab |
 | `i18n.js`, `i18n/*.js` | the page's own labels: English in `i18n.js`, each other language in its own file, loaded only when a page in it opens; `tx('key')` picks the page's language |
 | `scripts/make-gallery.mjs`, `.github/workflows/gallery.yml` | makes complete gallery pages (page, three factory versions, money) on the live site; run from the Actions tab |
-| `factory.js`, `money.js` load the first time the Factory or Money tab opens. All AI requests send their fixed instructions as a cached system prompt (repeats cost a tenth) and the details in the user message. | |
 | `money.js` | the Money tab: the estimate's prompt and schema, the sums, cards, payback and cost bars |
 | `factory.js` | the Factory tab: the plan's prompt and schema, the line diagram, the to-scale floor plan, the factory part of the report |
 | `demo.js`, `demo-scissors.jpg` | the built-in demo page, with its factory |
 | `worker/worker.js` | the link service: stores pages and pictures, short links, gallery, flags, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
 | `logo.svg`, `favicon-48.png`, `apple-touch-icon.png` | gear-with-a-question-mark badge, also the favicon and home-screen icon |
 | `og-image.jpg`, `robots.txt`, `sitemap.xml` | link preview picture and search-engine files |
+
+`factory.js` and `money.js` load the first time the Factory or Money tab opens. Every AI request sends its fixed instructions as a cached system prompt (repeats within a few minutes cost a tenth) and the product, language and reader in the user message.
 
 ## Privacy
 
