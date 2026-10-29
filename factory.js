@@ -24,7 +24,7 @@ const WHO = {
   human: { icon: '✋', label: 'People' },
 };
 const FACTORY_STYLE = "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, evenly lit, centred with margins, nothing cropped. No text, words or letters anywhere except the number badges.";
-const FACTORY_COST = '~18¢';
+const FACTORY_COST = '~12¢';
 
 // Three ways to build the same factory, each its own plan (with its own floor and pictures).
 const MODES = [
@@ -59,15 +59,11 @@ const FACTORY_SCHEMA = {
   },
 };
 
-function factoryPrompt(lang, level, r) {
-  const target = Object.values(r.factories || {}).find((v) => v.factory?.output)?.factory.output;
-  const parts = (r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ');
-  return `You are a manufacturing engineer. Plan a realistic factory that makes the product below, and explain it for ${level}. Write all text in ${lang}, except "name_en" and "floor_prompt", which are English. Answer as JSON only.
+// The instructions stay the same for every product, so they are sent as a cached system prompt;
+// what changes (the product, language, reader, version) goes in the request.
+const FACTORY_RULES = `You are a manufacturing engineer. Plan a realistic factory that makes the product in the request, as the kind of plant the request describes, and explain it for the reader it names. Write all text in the language it names, except "name_en" and "floor_prompt", which are English. Use the product's part numbers in every "parts" and "part" field. Answer as JSON only.
 
-Product: ${r.title_en || r.wikipedia_title || r.title}. Its numbered parts (use these numbers in every "parts" and "part" field): ${parts || 'none listed'}.
-
-Plan it as ${modeOf(r.factory_mode).brief}
-${target ? `Make it about the same output as the other versions of this factory: ${target}.` : 'Choose a sensible mid-size output'}, stated in "output" ("about 12,000 pairs a day"). "investment": rough cost of machines and fit-out in US dollars ("$4–6 million"). "unit_cost": rough cost to make one unit in this plant, materials, labour and machines included ("about $1.20 a pair"). Follow the material in time order through these stages:
+"output": the daily output ("about 12,000 pairs a day"): the one the request gives, or a sensible mid-size one. "investment": rough cost of machines and fit-out in US dollars ("$4–6 million"). "unit_cost": rough cost to make one unit in this plant, materials, labour and machines included ("about $1.20 a pair"). Follow the material in time order through these stages:
 "materials": raw materials arriving and stored; "components": parts bought in and parts made in-house; "fabrication": making each in-house part (cutting, pressing, casting, moulding, machining, heat treatment, finishing, painting); "assembly": joining the parts in order; "quality": inspections and tests, where on the line and with what; "packing"; "shipping".
 
 "materials": 3–7 raw materials. name with grade where it matters ("Stainless steel 420, 2 mm strip"); form as delivered ("coils", "pellets in 25 kg bags"); per_unit is the rough amount in one finished product ("38 g"); parts it becomes.
@@ -78,6 +74,13 @@ ${target ? `Make it about the same output as the other versions of this factory:
 "summary" ≤ 28 words: the whole journey from raw material to truck.
 "applicable": false only if nothing physical is manufactured (a natural phenomenon, a principle); then say why in "summary" and leave every list empty. Something built on site (a house) → plan the factory for its main prefabricated parts.
 "floor_prompt" (80–150 words, English): an isometric cutaway illustration of this factory floor with the roof removed, the zones in flow order with their machines, a few workers and conveyors, material moving from the receiving dock to the shipping dock. Then: "Each zone is marked with a white circle containing a bold black number: 1 <name_en of zone 1>, 2 <zone 2>, …" listing ALL zones. Then: ${FACTORY_STYLE}`;
+function factoryRequest(lang, level, r) {
+  const target = Object.values(r.factories || {}).find((v) => v.factory?.output)?.factory.output;
+  const parts = (r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ');
+  return `Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${parts || 'none listed'}.
+Kind of plant: ${modeOf(r.factory_mode).brief}
+Output: ${target ? `about the same as the other versions of this factory: ${target}` : 'choose a sensible mid-size output'}.
+Language: ${lang}. Reader: ${level}.`;
 }
 
 // Whatever comes back (from the AI, or from a shared page) is trimmed to this shape before it is drawn.
@@ -107,9 +110,11 @@ function cleanFactory(f, nParts) {
 }
 // Before → after for each zone, in zone order. before_from names an earlier zone whose "after" this
 // zone's "before" is (the work just moved on), so that picture is reused rather than painted again.
+// A picture another version of this factory already has: '<mode>:<key>' (the same object, the same moment).
+const SHARED_KEY = /^(manual|mixed|auto):z\d{1,2}[ab]$/;
 function cleanStates(v, nZones) {
   const s = (x, n) => (typeof x === 'string' ? x.slice(0, n) : '');
-  const look = (o) => ({ label: s(o?.label, 80), prompt: s(o?.prompt, 600) });
+  const look = (o) => ({ label: s(o?.label, 80), prompt: s(o?.prompt, 600), same_as: SHARED_KEY.test(o?.same_as || '') ? o.same_as : '' });
   return (Array.isArray(v) ? v.slice(0, nZones) : []).map((st, i) => {
     st = st && typeof st === 'object' ? st : {};
     const k = Math.round(Number(st.before_from));
@@ -117,8 +122,18 @@ function cleanStates(v, nZones) {
   });
 }
 
-const stateKey = (st, i, which) => (which === 'before' && st.before_from ? `z${st.before_from}a` : `z${i + 1}${which === 'before' ? 'b' : 'a'}`);
-function stateUrl(r, key) { return r.state_imgs?.[key] || (r.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${r.factory_where ? `${r.factory_where}/` : ''}${key}` : ''); }
+// Which picture shows a zone's before or after: another version's picture when it is the same thing,
+// the earlier zone's "after" when the work just moved on, otherwise the zone's own.
+const stateKey = (st, i, which, all) => {
+  if (st[which]?.same_as) return st[which].same_as;
+  if (which === 'before' && st.before_from) { const prev = all?.[st.before_from - 1]; return prev ? stateKey(prev, st.before_from - 1, 'after', all) : `z${st.before_from}a`; }
+  return `z${i + 1}${which === 'before' ? 'b' : 'a'}`;
+};
+function stateUrl(r, key) {
+  let v = r;
+  if (key.includes(':')) { const [m, k] = key.split(':'); key = k; v = m === (r.factory_mode || 'mixed') ? r : r.factories?.[m]; if (!v) return ''; }
+  return v.state_imgs?.[key] || (v.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${v.factory_where ? `${v.factory_where}/` : ''}${key}` : '');
+}
 // A factory plan is a long answer; for a big product it can run past the limit and arrive cut off,
 // which reads as broken JSON. Then ask once more, with more room and a request to be brief.
 async function askLongJSON(opts) {
@@ -167,8 +182,8 @@ async function makeFactory() {
   const lang = r.lang || $('#lang').value;
   try {
     const f = await askLongJSON({ model: PLAN_MODEL, maxTokens: 12000, schema: FACTORY_SCHEMA, signal: ctrl.signal, messages: [
-      { role: 'system', content: factoryPrompt(lang, $('#level').value, r) },
-      { role: 'user', content: `Plan the factory for: ${r.title}` },
+      cachedSystem(FACTORY_RULES),
+      { role: 'user', content: factoryRequest(lang, $('#level').value, r) },
     ] });
     r.factory = cleanFactory(f, (r.parts || []).length);
     r.image_factory = null; r.has_factory_img = false; r.floor_badges = undefined;
@@ -214,26 +229,36 @@ async function paintFloor() {
 }
 
 // ---------- before → after, zone by zone ----------
-const STATES_COST = '~12¢';
+const STATES_COST = '~6¢';
 const STATE_STYLE = "Vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, one clear subject centred with generous margins, three-quarter view, evenly lit. No machines, no people, no hands. No text, words, letters or numbers anywhere.";
-const LOOK = obj({ label: str, prompt: str });
+const LOOK = obj({ label: str, prompt: str, same_as: str });
 const STATES_SCHEMA = { type: 'json_schema', json_schema: { name: 'states', strict: true, schema: obj({
   zones: { type: 'array', items: obj({ before: LOOK, after: LOOK, change: str, before_from: int }) },
 }) } };
-function statesPrompt(lang, level, r) {
+const STATES_RULES = `You illustrate a factory zone by zone, so the reader SEES what each zone does to the work. Answer as JSON only.
+For EACH zone in the request, in the same order, one entry: "before" is the work as it ENTERS the zone, "after" as it LEAVES.
+"label" in the request's language, ≤ 8 words ("Steel strip on a 1-tonne coil"). "change" in that language, ≤ 14 words: what the zone does to it.
+"before_from": the number of an earlier zone whose "after" is exactly this zone's "before" (the work just moved on from there), otherwise 0 (the work starts here, like goods arriving or bought-in parts). Zone 1 is always 0: its before is what the trucks deliver.
+"prompt" (English, 25–50 words): only the object or objects as they look at that moment — real material, colour, finish, shape and how many (one blank, a stack of 20, a sealed carton) — so before and after are clearly different. Same viewpoint and scale for the same object across zones.
+"same_as": the request may list pictures already painted for other versions of this factory. When a before or after shows the same object in the same state as one of them (the same blank, the same finished part, the same carton), put that picture's id here and it is reused; otherwise "". Reuse whenever it honestly fits: the work looks the same however it was made.`;
+function statesRequest(lang, level, r) {
   const f = r.factory;
   const zones = f.zones.map((z, i) => {
     const steps = f.steps.filter((s) => s.zone === i + 1).map((s) => s.title).join('; ');
     return `${i + 1}. ${z.name_en || z.name} (machines: ${z.machines.map((m) => m.name).join(', ') || 'none'}${steps ? `; work done here: ${steps}` : ''})`;
   }).join('\n');
-  return `You illustrate a factory zone by zone for ${level}, so the reader SEES what each zone does to the work. Answer as JSON only.
-Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${(r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ')}.
-For EACH zone below, in the same order, one entry: "before" is the work as it ENTERS the zone, "after" as it LEAVES.
-"label" in ${lang}, ≤ 8 words ("Steel strip on a 1-tonne coil"). "change" in ${lang}, ≤ 14 words: what the zone does to it.
-"before_from": the number of an earlier zone whose "after" is exactly this zone's "before" (the work just moved on from there), otherwise 0 (the work starts here, like goods arriving or bought-in parts). Zone 1 is always 0: its before is what the trucks deliver.
-"prompt" (English, 25–50 words): only the object or objects as they look at that moment — real material, colour, finish, shape and how many (one blank, a stack of 20, a sealed carton) — so before and after are clearly different. Same viewpoint and scale for the same object across zones.
+  // pictures the other versions already have (their own, not ones they borrow)
+  const have = [];
+  for (const [m, v] of Object.entries(r.factories || {})) {
+    (v.factory?.states || []).forEach((st, i) => ['before', 'after'].forEach((w) => {
+      if (st[w]?.same_as || (w === 'before' && st.before_from) || !st[w]?.prompt) return;
+      have.push(`${m}:z${i + 1}${w === 'before' ? 'b' : 'a'} — ${st[w].prompt}`);
+    }));
+  }
+  return `Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${(r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ')}.
+Language: ${lang}. Reader: ${level}.
 Zones:
-${zones}`;
+${zones}${have.length ? `\nPictures already painted for other versions (id — what it shows):\n${have.join('\n')}` : ''}`;
 }
 // Small squares are plenty for these, and keep the stored page small.
 async function shrink(dataUrl, max = 512) {
@@ -267,26 +292,26 @@ async function paintStates(r, signal) {
     if (!f.states?.length) {
       task(r, 'states', 'run');
       const j = await askLongJSON({ model: PLAN_MODEL, maxTokens: 10000, schema: STATES_SCHEMA, signal, messages: [
-        { role: 'system', content: statesPrompt(r.lang || $('#lang').value, $('#level').value, r) },
-        { role: 'user', content: `Before and after for each zone of the ${r.title} factory.` },
+        cachedSystem(STATES_RULES),
+        { role: 'user', content: statesRequest(r.lang || $('#lang').value, $('#level').value, r) },
       ] });
       f.states = cleanStates(j.zones, f.zones.length);
     }
     task(r, 'states', 'done');
     const jobs = [];
     f.states.forEach((st, i) => {
-      jobs.push({ key: stateKey(st, i, 'after'), prompt: st.after.prompt });
-      if (!st.before_from) jobs.push({ key: stateKey(st, i, 'before'), prompt: st.before.prompt });
+      jobs.push({ key: stateKey(st, i, 'after', f.states), prompt: st.after.prompt });
+      if (!st.before_from) jobs.push({ key: stateKey(st, i, 'before', f.states), prompt: st.before.prompt });
     });
     r.state_imgs = r.state_imgs || {}; r.state_running = new Set();
-    const todo = jobs.filter((j) => j.prompt && !stateUrl(r, j.key));
+    const todo = jobs.filter((j) => j.prompt && !j.key.includes(':') && !stateUrl(r, j.key));
     let done = 0;
     task(r, 'pics', 'run', { total: todo.length, done });
     fillStates(r);
     await inPool(todo, PIC_LANES, async (j) => {
       r.state_running.add(j.key); fillState(r, j.key);
       try {
-        r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'medium' }));
+        r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'low' }));
       } catch (e) { if (e?.name === 'AbortError') throw e; failed++; }
       r.state_running.delete(j.key); fillState(r, j.key);
       task(r, 'pics', null, { done: ++done });
@@ -374,8 +399,10 @@ function partDots(nums, r) {
 const fmtM = (x) => (Math.round(x * 10) / 10).toLocaleString('en');
 const fmtArea = (x) => Math.round(x).toLocaleString('en');
 
+const cleaned = new WeakSet(); // plans already trimmed by cleanFactory
 function renderFactory() {
   const box = $('#factory'); const r = state.result; if (!box || !r) return;
+  if (r.factory && !cleaned.has(r.factory)) { r.factory = cleanFactory(r.factory, (r.parts || []).length); cleaned.add(r.factory); }
   const esc = escapeHTML; const f = r.factory;
   if (r.progress && !r.progress.end) tickProgress();
   const modes = modesHTML(r);
@@ -498,14 +525,14 @@ function ghostLine(busy) {
 
 function statesHTML(r, f) {
   const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states' || r.factory_busy === 'all';
-  const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before'), stateKey(st, i, 'after')].filter((k) => !stateUrl(r, k)).length, 0) : 0;
+  const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before', sts), stateKey(st, i, 'after', sts)].filter((k) => !stateUrl(r, k)).length, 0) : 0;
   const button = busy ? progButton(tx(sts.length ? 'paintingBtn' : 'describingBtn'))
     : !sts.length || missing ? (state.key
       ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${tx(sts.length ? 'paintMissing' : 'showInOut')} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
       : `<p class="hint fpaint">${tx('signInStates', { c: STATES_COST })}</p>`) : '';
   if (!sts.length) return busy ? `<p class="fwait">${tx('workingStates')}</p>` : button;
   const pic = (st, i, which) => {
-    const key = stateKey(st, i, which); const lab = st[which].label; const t = tile(r, key, lab);
+    const key = stateKey(st, i, which, sts); const lab = st[which].label; const t = tile(r, key, lab);
     return `<figure><div class="fbimg ${t.cls}" data-skey="${key}" data-alt="${esc(lab)}">${t.html}</div><figcaption><small>${tx(which)}</small>${esc(lab)}</figcaption></figure>`;
   };
   return `${button}<div class="fba">${f.zones.map((z, i) => {
@@ -557,7 +584,7 @@ const TASKS = {
   states: { label: 'Describe each zone', est: 30, lane: 2 },
   pics: { label: 'Paint before & after', est: 0, lane: 2 },
 };
-const PIC_LANES = 4, PIC_SECS = 22;
+const PIC_LANES = 6, PIC_SECS = 18;
 function startProgress(r, keys) {
   r.progress = { t0: Date.now(), tasks: keys.map((key) => ({ key, ...TASKS[key], status: 'wait', since: 0, done: 0, total: 0 })) };
   r.progress.tasks.forEach((t) => { t.label = tx(`task_${t.key}`); });
@@ -650,7 +677,7 @@ function showZoneTip(e, r, n) {
   const f = r.factory; const z = f?.zones?.[n - 1]; if (!z) return;
   const esc = escapeHTML; const sg = stageOf(z.stage); const st = f.states?.[n - 1];
   const pic = (which) => {
-    const t = st ? tile(r, stateKey(st, n - 1, which), '') : { cls: '', html: '<span>—</span>' };
+    const t = st ? tile(r, stateKey(st, n - 1, which, f.states), '') : { cls: '', html: '<span>—</span>' };
     return `<figure><div class="fbimg ${t.cls}">${t.html}</div><figcaption><small>${tx(which)}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
   };
   const t = zoneTip();

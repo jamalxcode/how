@@ -27,28 +27,29 @@ const MONEY_SCHEMA = {
   },
 };
 
-function moneyPrompt(lang, r, region) {
-  const known = allVersions(r).map(({ mode, f }) => {
-    const s = versionStats(f);
-    return `- ${mode.name} (${mode.key}), already planned: ${s.staff} people per shift × ${s.shifts} shifts, floor ${Math.round(s.area)} m², output ${f.output}; machines: ${f.zones.flatMap((z) => z.machines.map((m) => `${m.count}× ${m.name}`)).join(', ')}.`;
-  }).join('\n');
-  const target = allVersions(r)[0]?.f.output;
-  return `You are a manufacturing cost analyst. Estimate APPROXIMATE financials for three ways to set up a factory that makes the product below, located in: ${region}. US dollars, today's prices. Answer as JSON only; every amount is a plain number in US dollars (no symbols, no ranges).
-Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${(r.parts || []).map((p) => p.name_en || p.name).join(', ')}.
+const MONEY_RULES = `You are a manufacturing cost analyst. Estimate APPROXIMATE financials for three ways to set up a factory that makes the product in the request, in the region it names. US dollars, today's prices. Answer as JSON only; every amount is a plain number in US dollars (no symbols, no ranges).
 
 The three setups, one entry each in "setups", in this order:
 ${MODES.map((m) => `"${m.key}": ${m.brief}`).join('\n')}
-All three make the SAME output${target ? `: ${target}` : ' (choose a sensible mid-size output)'}; "output_per_month" is that in units per month, "unit_label" names the unit ("pairs", "units").
-${known ? `Use these plans where given, so the numbers match them:\n${known}\n` : ''}
+All three make the SAME output, the one the request gives or a sensible mid-size one; "output_per_month" is that in units per month, "unit_label" names the unit ("pairs", "units"). Where the request lists plans already made, use them, so the numbers match.
 For each setup:
 "land_m2" (plot, with yard and parking) and "building_m2".
-"staff": 4–8 roles covering ALL shifts (total headcount, not per shift) with the typical gross monthly salary for that role in ${region}, benefits included.
+"staff": 4–8 roles covering ALL shifts (total headcount, not per shift) with the typical gross monthly salary for that role in the region, benefits included.
 "capex": 6–12 one-off items: land and building (buy, or fit-out of a leased building — say which in the item), each main machine group, robots and automation, tooling and moulds, installation and commissioning, forklifts and racking, IT and software. No working capital.
 "power": installed kW, kWh per month, local industrial tariff per kWh.
-"opex": 4–8 MONTHLY items NOT counting staff, power or materials: rent or land lease (if not bought), maintenance and spares, consumables, insurance, water and other utilities, outbound transport, plus what is typical for ${region} (worker housing and visas in the Gulf, for example).
+"opex": 4–8 MONTHLY items NOT counting staff, power or materials: rent or land lease (if not bought), maintenance and spares, consumables, insurance, water and other utilities, outbound transport, plus what is typical for the region (worker housing and visas in the Gulf, for example).
 "material_per_unit": raw materials, bought-in parts and packaging for one unit.
 "price_reference": the typical factory-gate (wholesale) price range for one unit, and a short note on what that price is for.
-"assumptions": 3–5 short lines (working days, shifts, tariffs, wage basis) in ${lang}. "role", "item" and "note" in ${lang}.`;
+"assumptions": 3–5 short lines (working days, shifts, tariffs, wage basis) in the request's language. "role", "item" and "note" in that language too.`;
+function moneyRequest(lang, r, region) {
+  const known = allVersions(r).map(({ mode, f }) => {
+    const s = versionStats(f);
+    return `- ${mode.name} (${mode.key}): ${s.staff} people per shift × ${s.shifts} shifts, floor ${Math.round(s.area)} m², output ${f.output}; machines: ${f.zones.flatMap((z) => z.machines.map((m) => `${m.count}× ${m.name}`)).join(', ')}.`;
+  }).join('\n');
+  const target = allVersions(r)[0]?.f.output;
+  return `Product: ${r.title_en || r.wikipedia_title || r.title}. Parts: ${(r.parts || []).map((p) => p.name_en || p.name).join(', ')}.
+Region: ${region}. Language: ${lang}.
+Output: ${target || 'choose a sensible mid-size output'}.${known ? `\nPlans already made:\n${known}` : ''}`;
 }
 
 function cleanMoney(m) {
@@ -150,8 +151,8 @@ async function makeMoney(region) {
   const timer = setInterval(() => drawMoneyProgress(r), 1000);
   try {
     const m = await askLongJSON({ model: PLAN_MODEL, maxTokens: 9000, schema: MONEY_SCHEMA, signal: ctrl.signal, messages: [
-      { role: 'system', content: moneyPrompt(r.lang || $('#lang').value, r, region) },
-      { role: 'user', content: `Approximate financials for a ${r.title} factory in ${region}.` },
+      cachedSystem(MONEY_RULES),
+      { role: 'user', content: moneyRequest(r.lang || $('#lang').value, r, region) },
     ] });
     r.financials = cleanMoney(m);
     if (!r.financials?.setups.length) throw new Error('The estimate came back empty. Try again.');
@@ -175,6 +176,7 @@ const PARTS = [['payroll', 'people', '#1f8a8a'], ['materials', 'materials', '#2b
 
 function renderMoney() {
   const box = $('#money'); const r = state.result; if (!box || !r) return;
+  if (r.financials && !r.financials._clean) { r.financials = cleanMoney(r.financials); Object.defineProperty(r.financials, '_clean', { value: true }); }
   const esc = escapeHTML; const fin = r.financials;
   const region = fin?.region || moneyRegion();
   const regionPicker = `<label class="opt mregion"><span>${tx('where')}</span><select id="money-region">${REGIONS.map((x) => `<option${x === moneyRegion() ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;

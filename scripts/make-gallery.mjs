@@ -4,7 +4,7 @@
 //
 //   OPENROUTER_KEY=sk-or-… HOW_ADMIN_SECRET=… node scripts/make-gallery.mjs
 //
-// Optional: ITEMS="kettle, bicycle" (default: the list below), REGION (Money tab), MAX_SPEND in US
+// About 30¢ and 5–10 minutes per thing. Optional: ITEMS="kettle, bicycle" (default: the list below), REGION (Money tab), MAX_SPEND in US
 // dollars (default 15: stops before starting a new item once spent), HOW_SITE (default the live site).
 // Runs from GitHub Actions too: see .github/workflows/gallery.yml.
 import { chromium } from 'playwright';
@@ -16,6 +16,7 @@ const MODES = ['mixed', 'manual', 'auto'];
 // One thing, start to finish, on a page that is already open on the site.
 export async function makeOne(page, item, { region, log = console.log } = {}) {
   const t0 = Date.now(); const out = { item, ok: false, cost: 0 };
+  await page.evaluate(() => loadFeatures()); // the Factory and Money code loads on demand
   await page.evaluate((q) => { $('#lang').value = 'English'; $('#level').value = 'curious adult'; ask(q, { force: true }); }, item);
   await page.waitForFunction(() => state.result && (state.result.kind === 'refused' || (state.result.painting === false && state.shortId)) || !$('#error').hidden, null, { timeout: 15 * 60e3 });
   const first = await page.evaluate(() => ({ error: $('#error').hidden ? '' : $('#error-msg').textContent, kind: state.result?.kind, title: state.result?.title }));
@@ -49,7 +50,7 @@ async function main() {
     console.log(`${item}…`);
     const page = await ctx.newPage();
     try {
-      await page.goto(site); await page.waitForFunction(() => typeof makeFactory === 'function');
+      await page.goto(site); await page.waitForFunction(() => typeof loadFeatures === 'function');
       const r = await makeOne(page, item, { region });
       spent += r.cost || 0; done.push(r);
       console.log(`  ${r.ok ? 'added to the gallery' : `not added: ${r.error || r.gallery}`} · $${(r.cost || 0).toFixed(2)} · ${r.minutes ?? '?'} min · total $${spent.toFixed(2)}`);

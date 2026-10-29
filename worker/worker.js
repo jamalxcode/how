@@ -77,7 +77,7 @@ function cleanFactory(f, nParts) {
     zones, floor_prompt: s(f.floor_prompt, 2000),
     states: (Array.isArray(f.states) ? f.states.slice(0, zones.length) : []).map((st, i) => {
       st = st && typeof st === 'object' ? st : {};
-      const k = Math.round(Number(st.before_from)); const look = (o) => ({ label: s(o?.label, 80), prompt: s(o?.prompt, 600) });
+      const k = Math.round(Number(st.before_from)); const look = (o) => ({ label: s(o?.label, 80), prompt: s(o?.prompt, 600), same_as: /^(manual|mixed|auto):z\d{1,2}[ab]$/.test(o?.same_as || '') ? o.same_as : '' });
       return { change: s(st.change, 160), before_from: k >= 1 && k <= i ? k : 0, before: look(st.before), after: look(st.after) };
     }),
   };

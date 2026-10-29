@@ -129,10 +129,12 @@ const PLAN_SCHEMA = {
   },
 };
 
-function planPrompt(lang, level) {
-  return `You write the pages of a children's "how it works" picture encyclopedia: the reader learns by LOOKING. Each page is ONE big picture (an exploded or cutaway view, painted by an image model from your prompt) with numbered parts and a few short steps. Answer as JSON only.
+// Fixed instructions go first, marked for prompt caching: a repeat within a few minutes reads them at
+// a tenth of the price. What changes with each question goes in the user message.
+const cachedSystem = (text) => ({ role: 'system', content: [{ type: 'text', text, cache_control: { type: 'ephemeral' } }] });
+const PLAN_RULES = `You write the pages of a children's "how it works" picture encyclopedia: the reader learns by LOOKING. Each page is ONE big picture (an exploded or cutaway view, painted by an image model from your prompt) with numbered parts and a few short steps. Answer as JSON only.
 
-Write title, hook, part names/roles, steps and fun_fact in ${lang}, for ${level}. "title" is just the thing's name ("Skateboard", not "How a Skateboard Works"). "name_en" is the part's English name. Keep text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words; 4–8 parts; 3–6 steps. Choose the parts by what makes the thing DO its job, including hidden ones that matter (a phone: antenna and radio chip; a fridge: compressor and refrigerant loop). A part is a physical thing you could touch.
+Write title, hook, part names/roles, steps and fun_fact in the language the request names, for the reader it names. "title" is just the thing's name ("Skateboard", not "How a Skateboard Works"). "name_en" is the part's English name. Keep text tiny: hook ≤ 20 words; role ≤ 12 words; step text ≤ 22 words; 4–8 parts; 3–6 steps. Choose the parts by what makes the thing DO its job, including hidden ones that matter (a phone: antenna and radio chip; a fridge: compressor and refrigerant loop). A part is a physical thing you could touch.
 "kind": "object" for a thing made of parts (engine, scissors, can opener); "diagram" for a principle shown between things (reading glasses, why planes fly); "process" (how a house is built: parts are its stages); "refused" only if unsafe (weapons, explosives, drugs, harming people) or meaningless, then explain in hook and leave the rest empty.
 "wikipedia_title": English Wikipedia article title. "search_terms": 2–3 English words to find a 3D model.
 
@@ -147,7 +149,6 @@ Part descriptions inside both prompts: image models default to the familiar whol
 2. The view: for an "object", "exploded view: the parts separated along one axis in their real order, real relative sizes, small gaps, thin grey leader lines"; for a "diagram", a clear cutaway or scene; for a "process", a left-to-right sequence of stages.
 3. "Every one of these parts is clearly visible and marked with a white circle containing a bold black number placed right next to that part (not in a column at the edge): 1 <name_en of part 1>, 2 <part 2>, …" listing ALL parts in the parts-list order.
 4. STYLE.`;
-}
 
 async function askJSON({ model, messages, schema, maxTokens, signal }) {
   let text;
@@ -164,8 +165,8 @@ async function askJSON({ model, messages, schema, maxTokens, signal }) {
 async function makePlan(q, lang, level, signal) {
   const ask = `Make the page for: ${q}` + (/\(of .+\)$/.test(q) ? ' (the reader just looked at the larger thing in brackets and tapped this part; explain the part itself)' : '');
   const plan = await askJSON({ model: PLAN_MODEL, maxTokens: 3000, schema: PLAN_SCHEMA, signal, messages: [
-    { role: 'system', content: planPrompt(lang, level) },
-    { role: 'user', content: ask },
+    cachedSystem(PLAN_RULES),
+    { role: 'user', content: `${ask}\nLanguage: ${lang}. Reader: ${level}.` },
   ] });
   plan.parts = (plan.parts || []).map((p, i) => ({ id: `p${i + 1}`, ...p }));
   return plan;
@@ -327,6 +328,24 @@ function countAnswer(title, how) {
     if (++tries < 20) setTimeout(send, 500);
   })();
 }
+// The Factory and Money tabs' code loads the first time one of them opens (most visitors never do).
+let featuresLoading = null;
+function loadFeatures() {
+  if (typeof renderMoney === 'function') return Promise.resolve();
+  const add = (src) => new Promise((ok, no) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => no(new Error('Could not load this tab. Check your connection and try again.')); document.body.appendChild(el); });
+  return (featuresLoading = featuresLoading || add('factory.js?v=12').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
+}
+// A language's labels arrived after the page was drawn: put them in place.
+function relabel() {
+  const r = state.result; if (!r) return;
+  $('#r-kind').textContent = r.kind === 'refused' ? 'Sorry' : tx(r.kind === 'process' ? 'howItIsDone' : 'howItWorks');
+  $$('[data-i18n]').forEach((el) => { el.textContent = tx(el.dataset.i18n); });
+  $('#fact').dataset.label = tx('didYouKnow');
+  if (!$('#flag').disabled) $('#flag').textContent = tx('somethingWrong');
+  if (!$('#tab-factory').classList.contains('prog')) $('#tab-factory').textContent = tx('tab_factory');
+  $$('.ask-more').forEach((b) => { b.textContent = tx('howDoesThisWork'); });
+  const v = $('.tab.active')?.dataset.view; if (v === 'factory' || v === 'money') setView(v);
+}
 // Which tabs people open (once per page and tab), next to the answers in GoatCounter.
 const tabsCounted = new Set();
 function countTab(view) {
@@ -423,11 +442,12 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   $('#tab-whole').hidden = !wholeUrl(result);
   $('#tab-factory').hidden = result.kind === 'refused';
   $('#tab-money').hidden = result.kind === 'refused';
-  if (result.financials) result.financials = cleanMoney(result.financials);
+  if (result.financials && typeof cleanMoney === 'function') result.financials = cleanMoney(result.financials);
   $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = tx('tab_factory');
   const demoOf = typeof DEMO !== 'undefined' && (result.lang || 'English') === 'English' && DEMO[(result.title || '').toLowerCase()];
   if (demoOf && demoOf !== result) { if (!result.factory && demoOf.factory) result.factory = JSON.parse(JSON.stringify(demoOf.factory)); if (!result.financials && demoOf.financials) result.financials = JSON.parse(JSON.stringify(demoOf.financials)); }
-  if (result.factory) result.factory = cleanFactory(result.factory, (result.parts || []).length);
+  if (result.factory && typeof cleanFactory === 'function') result.factory = cleanFactory(result.factory, (result.parts || []).length);
+  loadLang(langCode(result.lang), relabel);
   // other versions of the factory: their pictures are stored under their own name unless said otherwise
   for (const [m, v] of Object.entries(result.factories || {})) { if (v.factory_where === undefined) v.factory_where = v.where ?? m; }
   pictureMode = 'exploded';
@@ -544,9 +564,13 @@ function setView(view) {
   $('#view-photos').hidden = view !== 'photos';
   $('#view-model3d').hidden = view !== 'model3d';
   $('#view-factory').hidden = view !== 'factory';
-  if (view === 'factory') renderFactory();
   $('#view-money').hidden = view !== 'money';
-  if (view === 'money') renderMoney();
+  if (view === 'factory' || view === 'money') {
+    const box = $(view === 'factory' ? '#factory' : '#money');
+    if (typeof renderMoney !== 'function') box.innerHTML = '<p class="empty">…</p>';
+    loadFeatures().then(() => { if ($('.tab.active')?.dataset.view === view) (view === 'factory' ? renderFactory : renderMoney)(); })
+      .catch((e) => { box.innerHTML = `<p class="empty">${escapeHTML(e.message)}</p>`; });
+  }
 }
 
 // ---------- photos of the real thing (Wikipedia) ----------
