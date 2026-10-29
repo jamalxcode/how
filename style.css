@@ -369,7 +369,7 @@ body.has-result .hero-sub { display: none; }
 .fintro .hint { font-size: 14px; margin-top: 10px; }
 .ferror { color: var(--red-dark); font-size: 14px; }
 .fsummary { text-align: center; font-family: var(--font-display); font-style: italic; font-size: 18px; color: var(--ink-2); max-width: 680px; margin: 4px auto 14px; }
-.ftiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ftiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
 .ftile { background: var(--paper-2); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 12px; }
 .ftile span { display: block; text-transform: uppercase; letter-spacing: .1em; font-size: 11px; font-weight: 800; color: var(--teal); }
 .ftile b { display: block; font-family: var(--font-display); font-size: 19px; line-height: 1.2; margin-top: 2px; }
@@ -560,3 +560,30 @@ body.has-result .hero-sub { display: none; }
 .tab.prog { background-image: linear-gradient(90deg, rgba(228,87,46,.35) var(--prog, 0%), transparent var(--prog, 0%)); font-variant-numeric: tabular-nums; }
 .tab.active.prog { background-image: linear-gradient(90deg, var(--red) var(--prog, 0%), var(--ink) var(--prog, 0%)); }
 @media (prefers-reduced-motion: reduce) { .btn-prog::before { animation: none; } }
+
+/* three versions of the factory: hand-made, mixed, automated */
+.fmodes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 14px; }
+.fmode { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto; column-gap: 10px; text-align: left; border: 2px solid var(--line); background: var(--paper-2); border-radius: 14px; padding: 10px 12px; }
+.fmode:hover:not(:disabled) { border-color: var(--ink); }
+.fmode.active { border-color: var(--ink); background: var(--paper); box-shadow: 0 4px 0 -1px var(--ink); }
+.fmode:disabled { opacity: .5; cursor: default; }
+.fm-ic { grid-row: 1 / 4; font-size: 26px; line-height: 1; align-self: center; }
+.fmode b { font-family: var(--font-display); font-size: 17px; }
+.fmode small { color: var(--ink-2); font-size: 13px; }
+.fmode em { font-style: normal; font-size: 12px; font-weight: 800; color: var(--muted); }
+.fmode.active em { color: var(--teal); }
+.fcompare { overflow-x: auto; margin: 0 0 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--paper-2); }
+.fcompare table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 420px; }
+.fcompare th, .fcompare td { padding: 7px 12px; text-align: left; border-top: 1px solid var(--line); vertical-align: top; }
+.fcompare thead th { border-top: 0; font-family: var(--font-display); font-size: 15px; }
+.fcompare tbody th { font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.fcompare .cur { background: var(--paper); font-weight: 800; }
+.fcompare small { color: var(--muted); font-weight: 600; }
+.result[dir="rtl"] .fmode, .result[dir="rtl"] .fcompare th, .result[dir="rtl"] .fcompare td { text-align: right; }
+@media (max-width: 560px) {
+  .fmodes { grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .fmode { grid-template-columns: 1fr; text-align: center; padding: 8px 6px; }
+  .fm-ic { grid-row: auto; font-size: 22px; }
+  .fmode small { display: none; }
+  .fmode b { font-size: 15px; }
+}

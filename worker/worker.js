@@ -5,6 +5,8 @@
 //   GET  /img/<id>/whole → the assembled picture, if any
 //   GET  /img/<id>/factory → the painted factory floor, if any
 //   GET  /img/<id>/s/<key> → a before/after picture of one factory zone (key z<zone>a or z<zone>b)
+//   GET  /img/<id>/factory/<mode>, /img/<id>/s/<mode>/<key> → the same for another version of the factory
+//        (mode manual, mixed or auto); the version shown when the page was stored uses the paths above
 //   GET  /gallery       → the curated list [{ id, title, hook, lang, svg }]
 //   POST /gallery       header X-Admin: <ADMIN_SECRET>, body { id, title, hook, lang, svg } → adds it
 //   DELETE /gallery/<id> header X-Admin                      → removes it
@@ -41,7 +43,7 @@ function cleanAnswer(d) {
     image_id: /^[a-z0-9]{5,12}$/.test(d.image_id || '') ? d.image_id : undefined,
     factory: cleanFactory(d.factory, Array.isArray(d.parts) ? Math.min(d.parts.length, 20) : 0),
     // where the painted factory floor's zone numbers are, in % of the picture
-    floor_badges: LIST(d.floor_badges, 12, (b) => (b && Number.isInteger(b.n) && b.n >= 1 && b.n <= 12 && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100 ? { n: b.n, x: Number(b.x), y: Number(b.y) } : null)),
+    floor_badges: cleanBadges(d.floor_badges),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
@@ -65,7 +67,7 @@ function cleanFactory(f, nParts) {
     machines: list(z.machines, 6, (m) => ({ name: s(m.name, 60), count: Math.round(n(m.count, 1, 60)), length_m: n(m.length_m, 0.3, 60), width_m: n(m.width_m, 0.3, 30) })),
   }));
   return {
-    applicable: f.applicable !== false, summary: s(f.summary, 300), output: s(f.output, 100),
+    applicable: f.applicable !== false, summary: s(f.summary, 300), output: s(f.output, 100), investment: s(f.investment, 60), unit_cost: s(f.unit_cost, 60),
     shifts: Math.round(n(f.shifts, 1, 3)), workers_per_shift: Math.round(n(f.workers_per_shift, 0, 9999)),
     building: { length_m: n(f.building?.length_m, 5, 600), width_m: n(f.building?.width_m, 5, 400), height_m: n(f.building?.height_m, 2, 40) },
     materials: list(f.materials, 10, (m) => ({ name: s(m.name, 80), form: s(m.form, 80), per_unit: s(m.per_unit, 40), parts: partNums(m.parts) })),
@@ -80,6 +82,8 @@ function cleanFactory(f, nParts) {
   };
 }
 const STATE_KEY = /^z\d{1,2}[ab]$/;
+const MODES = ['manual', 'mixed', 'auto'];
+const cleanBadges = (v) => LIST(v, 12, (b) => (b && Number.isInteger(b.n) && b.n >= 1 && b.n <= 12 && b.x >= 0 && b.x <= 100 && b.y >= 0 && b.y <= 100 ? { n: b.n, x: Number(b.x), y: Number(b.y) } : null));
 // Decoded picture bytes must start like a JPEG, PNG or WebP file.
 const looksLikeImage = (b) => b && b.length > 12 && (
   (b[0] === 0xff && b[1] === 0xd8) || (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) ||
@@ -224,15 +228,15 @@ export default {
       return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}\/s\/z\d{1,2}[ab]$/.test(path)) {
-      const [, , pid, , key] = path.split('/');
-      const img = await env.LINKS.get(`imgs:${pid}:${key}`, { type: 'arrayBuffer' });
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}\/s\/((manual|mixed|auto)\/)?z\d{1,2}[ab]$/.test(path)) {
+      const bits = path.split('/'); const pid = bits[2]; const key = bits.pop(); const mode = bits.length === 5 ? bits[4] : '';
+      const img = await env.LINKS.get(`imgs:${pid}:${mode ? `${mode}:` : ''}${key}`, { type: 'arrayBuffer' });
       if (!img) return json({ error: 'not found' }, 404, h);
       return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole|\/factory)?$/.test(path)) {
-      const pid = path.split('/')[2]; const which = path.split('/')[3];
-      const img = await env.LINKS.get(`${which === 'whole' ? 'imgw' : which === 'factory' ? 'imgf' : 'img'}:${pid}`, { type: 'arrayBuffer' });
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole|\/factory(\/(manual|mixed|auto))?)?$/.test(path)) {
+      const [, , pid, which, mode] = path.split('/');
+      const img = await env.LINKS.get(`${which === 'whole' ? 'imgw' : which === 'factory' ? 'imgf' : 'img'}:${pid}${mode ? `:${mode}` : ''}`, { type: 'arrayBuffer' });
       if (!img) return json({ error: 'not found' }, 404, h);
       return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
@@ -262,7 +266,7 @@ export default {
       if (!imgBytes && data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) {
         imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' });
         if (!wholeBytes) wholeBytes = await env.LINKS.get(`imgw:${data.image_id}`, { type: 'arrayBuffer' });
-        if (!factBytes && data.has_factory_img) factBytes = await env.LINKS.get(`imgf:${data.image_id}`, { type: 'arrayBuffer' });
+        if (!factBytes && data.has_factory_img) factBytes = await env.LINKS.get(`imgf:${data.image_id}${MODES.includes(data.factory_where) ? `:${data.factory_where}` : ''}`, { type: 'arrayBuffer' });
       }
       // before/after pictures of the factory zones: new ones as data URLs, stored ones by key
       const stateBytes = {};
@@ -276,18 +280,54 @@ export default {
       if (/^[a-z0-9]{5,12}$/.test(data.image_id || '') && Array.isArray(data.state_keys)) {
         for (const sk of data.state_keys.slice(0, 24)) {
           if (typeof sk !== 'string' || !STATE_KEY.test(sk) || stateBytes[sk]) continue;
-          const b = await env.LINKS.get(`imgs:${data.image_id}:${sk}`, { type: 'arrayBuffer' });
+          const b = await env.LINKS.get(`imgs:${data.image_id}:${MODES.includes(data.factory_where) ? `${data.factory_where}:` : ''}${sk}`, { type: 'arrayBuffer' });
           if (b) stateBytes[sk] = b;
+        }
+      }
+      // the other versions of the factory (hand-made / mixed / automated), each with its own pictures
+      const mode = MODES.includes(data.factory_mode) ? data.factory_mode : 'mixed';
+      const variants = {}; const nParts = Array.isArray(data.parts) ? Math.min(data.parts.length, 20) : 0;
+      const oldId = /^[a-z0-9]{5,12}$/.test(data.image_id || '') ? data.image_id : null;
+      if (data.factories && typeof data.factories === 'object') {
+        for (const m of MODES) {
+          const v = data.factories[m]; if (m === mode || !v || typeof v !== 'object' || !v.factory) continue;
+          const at = MODES.includes(v.where) ? `:${v.where}` : ''; // where this version's pictures are now
+          let floor = decode(v.image_factory);
+          if (floor && !looksLikeImage(floor)) return json({ error: 'not a picture' }, 400, h);
+          if (!floor && v.has_factory_img && oldId) floor = await env.LINKS.get(`imgf:${oldId}${at}`, { type: 'arrayBuffer' });
+          const pics = {};
+          if (v.state_images && typeof v.state_images === 'object') {
+            for (const [sk, val] of Object.entries(v.state_images).slice(0, 24)) {
+              const b = STATE_KEY.test(sk) ? decode(val) : null;
+              if (b && !looksLikeImage(b)) return json({ error: 'not a picture' }, 400, h);
+              if (b) pics[sk] = b;
+            }
+          }
+          if (oldId && Array.isArray(v.state_keys)) {
+            for (const sk of v.state_keys.slice(0, 24)) {
+              if (typeof sk !== 'string' || !STATE_KEY.test(sk) || pics[sk]) continue;
+              const b = await env.LINKS.get(`imgs:${oldId}${at}:${sk}`, { type: 'arrayBuffer' });
+              if (b) pics[sk] = b;
+            }
+          }
+          const factory = cleanFactory(v.factory, nParts);
+          if (factory) variants[m] = { factory, floor, pics, floor_badges: cleanBadges(v.floor_badges) };
         }
       }
       data = cleanAnswer(data);
       data.has_whole = !!wholeBytes;
+      if (data.factory) data.factory_mode = mode;
+      const vNames = Object.keys(variants);
+      if (vNames.length) {
+        data.factories = Object.fromEntries(vNames.map((m) => { const v = variants[m]; const keys = Object.keys(v.pics).sort();
+          return [m, { factory: v.factory, has_factory_img: !!v.floor || undefined, state_keys: keys.length ? keys : undefined, floor_badges: v.floor_badges }]; }));
+      }
       const stateKeys = data.factory ? Object.keys(stateBytes).sort() : [];
       if (stateKeys.length) data.state_keys = stateKeys;
       if (factBytes && data.factory) data.has_factory_img = true;
       // same answer (+ same picture) → same id, so re-sharing never fills the store
       const body = JSON.stringify(data);
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '') + (factBytes ? `f${factBytes.byteLength}` : '') + stateKeys.map((sk) => `${sk}${stateBytes[sk].byteLength}`).join('')));
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '') + (factBytes ? `f${factBytes.byteLength}` : '') + stateKeys.map((sk) => `${sk}${stateBytes[sk].byteLength}`).join('') + vNames.map((m) => `${m}${variants[m].floor?.byteLength || 0}${Object.values(variants[m].pics).map((b) => b.byteLength).join('.')}`).join('')));
       const k = [...new Uint8Array(digest).slice(0, 7)].map((x) => ALPHABET[x % ALPHABET.length]).join('');
       data.image_id = imgBytes ? k : (data.image_id || undefined);
       await env.LINKS.put(k, JSON.stringify(data));
@@ -295,8 +335,13 @@ export default {
       if (wholeBytes) await env.LINKS.put(`imgw:${k}`, wholeBytes);
       if (data.has_factory_img) await env.LINKS.put(`imgf:${k}`, factBytes);
       for (const sk of stateKeys) await env.LINKS.put(`imgs:${k}:${sk}`, stateBytes[sk]);
-      // "factory" and "states" tell the page what this service kept (an older one drops them silently)
-      return json({ id: k, factory: !!data.factory, states: stateKeys.length }, 200, h);
+      for (const m of vNames) {
+        if (variants[m].floor) await env.LINKS.put(`imgf:${k}:${m}`, variants[m].floor);
+        for (const [sk, b] of Object.entries(variants[m].pics)) await env.LINKS.put(`imgs:${k}:${m}:${sk}`, b);
+      }
+      // "factory", "states" and "variants" tell the page what this service kept (an older one drops them silently)
+      return json({ id: k, factory: !!data.factory, states: stateKeys.length,
+        variants: Object.fromEntries(vNames.map((m) => [m, { floor: !!variants[m].floor, states: Object.keys(variants[m].pics).length }])) }, 200, h);
     }
 
     return json({ ok: true, service: 'how-links', admin: !!env.ADMIN_SECRET }, 200, h);

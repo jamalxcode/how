@@ -25,6 +25,19 @@ const WHO = {
 const FACTORY_STYLE = "vintage children's encyclopedia illustration, flat bold colours, thick dark outlines, soft cream paper background, evenly lit, centred with margins, nothing cropped. No text, words or letters anywhere except the number badges.";
 const FACTORY_COST = '~18¢';
 
+// Three ways to build the same factory, each its own plan (with its own floor and pictures).
+const MODES = [
+  { key: 'manual', icon: '✋', name: 'Hand-made', note: 'Mostly people, simple tools',
+    brief: 'a LABOUR-HEAVY workshop: low investment, skilled and semi-skilled workers do most of the work with hand tools, jigs and simple manual or semi-automatic machines; machines only where hands truly cannot do the job (melting, heat treatment, heavy pressing). Many workers, little capital, flexible.' },
+  { key: 'mixed', icon: '🤝', name: 'Mixed', note: 'Machines with people',
+    brief: 'a typical modern plant: machines do the repetitive, precise, heavy or dangerous work; people load and set machines, assemble, inspect and handle what varies.' },
+  { key: 'auto', icon: '🤖', name: 'Automated', note: 'Robots; people only where needed',
+    brief: 'a HIGHLY AUTOMATED plant ("lights-out" where possible): robots, CNC cells, automated storage and retrieval, conveyors, AGVs, automatic packing and palletising, machine vision for inspection. People ONLY where they are actually needed (maintenance, supervision, material problems, judgement no machine can make yet); for every "human" or "both" step, say in "why" why a person is still needed. Few workers, high investment.' },
+];
+const modeOf = (k) => MODES.find((m) => m.key === k) || MODES[1];
+// What belongs to one version, swapped in and out of the page as the reader switches.
+const VFIELDS = ['factory', 'image_factory', 'has_factory_img', 'state_imgs', 'state_keys', 'floor_badges', 'factory_where'];
+
 // ---------- the plan, from Claude ----------
 const obj = (properties) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
 const str = { type: 'string' }, num = { type: 'number' }, int = { type: 'integer' }, ints = { type: 'array', items: { type: 'integer' } };
@@ -33,7 +46,7 @@ const FACTORY_SCHEMA = {
   json_schema: {
     name: 'factory', strict: true,
     schema: obj({
-      applicable: { type: 'boolean' }, summary: str, output: str, shifts: int, workers_per_shift: int,
+      applicable: { type: 'boolean' }, summary: str, output: str, shifts: int, workers_per_shift: int, investment: str, unit_cost: str,
       building: obj({ length_m: num, width_m: num, height_m: num }),
       materials: { type: 'array', items: obj({ name: str, form: str, per_unit: str, parts: ints }) },
       components: { type: 'array', items: obj({ part: int, make: { type: 'boolean' }, process: str }) },
@@ -46,12 +59,14 @@ const FACTORY_SCHEMA = {
 };
 
 function factoryPrompt(lang, level, r) {
+  const target = Object.values(r.factories || {}).find((v) => v.factory?.output)?.factory.output;
   const parts = (r.parts || []).map((p, i) => `${i + 1} = ${p.name_en || p.name}`).join('; ');
   return `You are a manufacturing engineer. Plan a realistic factory that makes the product below, and explain it for ${level}. Write all text in ${lang}, except "name_en" and "floor_prompt", which are English. Answer as JSON only.
 
 Product: ${r.title_en || r.wikipedia_title || r.title}. Its numbered parts (use these numbers in every "parts" and "part" field): ${parts || 'none listed'}.
 
-Plan a mid-size plant with a sensible output, stated in "output" ("about 12,000 pairs a day"). Follow the material in time order through these stages:
+Plan it as ${modeOf(r.factory_mode).brief}
+${target ? `Make it about the same output as the other versions of this factory: ${target}.` : 'Choose a sensible mid-size output'}, stated in "output" ("about 12,000 pairs a day"). "investment": rough cost of machines and fit-out in US dollars ("$4–6 million"). "unit_cost": rough cost to make one unit in this plant, materials, labour and machines included ("about $1.20 a pair"). Follow the material in time order through these stages:
 "materials": raw materials arriving and stored; "components": parts bought in and parts made in-house; "fabrication": making each in-house part (cutting, pressing, casting, moulding, machining, heat treatment, finishing, painting); "assembly": joining the parts in order; "quality": inspections and tests, where on the line and with what; "packing"; "shipping".
 
 "materials": 3–7 raw materials. name with grade where it matters ("Stainless steel 420, 2 mm strip"); form as delivered ("coils", "pellets in 25 kg bags"); per_unit is the rough amount in one finished product ("38 g"); parts it becomes.
@@ -81,7 +96,7 @@ function cleanFactory(f, nParts) {
     zone: Math.round(n(st.zone, 0, zones.length)),
   })).map((st, i) => ({ st, i })).sort((a, b) => STAGE_KEYS.indexOf(a.st.stage) - STAGE_KEYS.indexOf(b.st.stage) || a.i - b.i).map(({ st }) => st);
   return {
-    applicable: f.applicable !== false, summary: s(f.summary, 300), output: s(f.output, 100),
+    applicable: f.applicable !== false, summary: s(f.summary, 300), output: s(f.output, 100), investment: s(f.investment, 60), unit_cost: s(f.unit_cost, 60),
     shifts: Math.round(n(f.shifts, 1, 3)), workers_per_shift: Math.round(n(f.workers_per_shift, 0, 9999)),
     building: { length_m: n(f.building?.length_m, 5, 600), width_m: n(f.building?.width_m, 5, 400), height_m: n(f.building?.height_m, 2, 40) },
     materials: list(f.materials, 10, (m) => ({ name: s(m.name, 80), form: s(m.form, 80), per_unit: s(m.per_unit, 40), parts: partNums(m.parts) })),
@@ -102,7 +117,7 @@ function cleanStates(v, nZones) {
 }
 
 const stateKey = (st, i, which) => (which === 'before' && st.before_from ? `z${st.before_from}a` : `z${i + 1}${which === 'before' ? 'b' : 'a'}`);
-function stateUrl(r, key) { return r.state_imgs?.[key] || (r.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${key}` : ''); }
+function stateUrl(r, key) { return r.state_imgs?.[key] || (r.state_keys?.includes(key) && r.image_id ? `${LINKS_API}/img/${r.image_id}/s/${r.factory_where ? `${r.factory_where}/` : ''}${key}` : ''); }
 // A factory plan is a long answer; for a big product it can run past the limit and arrive cut off,
 // which reads as broken JSON. Then ask once more, with more room and a request to be brief.
 async function askLongJSON(opts) {
@@ -116,7 +131,30 @@ async function askLongJSON(opts) {
     }
   }
 }
-function factoryUrl(r) { return r.image_factory || (r.has_factory_img && r.image_id ? `${LINKS_API}/img/${r.image_id}/factory` : ''); }
+function factoryUrl(r) { return r.image_factory || (r.has_factory_img && r.image_id ? `${LINKS_API}/img/${r.image_id}/factory${r.factory_where ? `/${r.factory_where}` : ''}` : ''); }
+// Switch the page to another version: the shown one is put away, the chosen one taken out.
+function switchMode(r, mode) {
+  if (r.factory_busy || mode === (r.factory_mode || 'mixed')) return;
+  r.factories = r.factories || {};
+  if (r.factory) r.factories[r.factory_mode || 'mixed'] = Object.fromEntries(VFIELDS.map((k) => [k, r[k]]));
+  const next = r.factories[mode] || {};
+  VFIELDS.forEach((k) => { r[k] = next[k]; });
+  if (r.factory) r.factory = cleanFactory(r.factory, (r.parts || []).length);
+  delete r.factories[mode];
+  r.factory_mode = mode; r.factory_error = ''; r._locatingFloor = false;
+  hideZoneTip(); renderFactory(); cacheFactory(r);
+}
+// Every planned version of this page, for the comparison.
+function allVersions(r) {
+  const out = { ...(r.factories || {}) };
+  if (r.factory) out[r.factory_mode || 'mixed'] = { factory: r.factory };
+  return MODES.filter((m) => out[m.key]?.factory?.applicable).map((m) => ({ mode: m, f: out[m.key].factory }));
+}
+function versionStats(f) {
+  const n = f.steps.length || 1; const lay = layoutFloor(f.zones);
+  return { staff: f.workers_per_shift || f.zones.reduce((a, z) => a + z.staff, 0), shifts: f.shifts, machine: Math.round(f.steps.filter((s) => s.who === 'machine').length / n * 100),
+    human: Math.round(f.steps.filter((s) => s.who === 'human').length / n * 100), area: lay ? lay.L * lay.W : 0, output: f.output, investment: f.investment, unit_cost: f.unit_cost };
+}
 
 async function makeFactory() {
   const r = state.result; if (!r || r.factory_busy) return;
@@ -276,6 +314,9 @@ function refreshFactory(r) {
   if (state.result !== r || $('#view-factory').hidden) return;
   if (!$('#fstates')) { renderFactory(); return; }
   fillFloor(r); fillStates(r);
+  const fm = $('#factory .fmodes'); if (fm) { fm.outerHTML = modesHTML(r); wireModes(r); }
+  const cmp = $('#factory .fcompare'); const ch = compareHTML(r);
+  if (cmp) cmp.outerHTML = ch; else if (ch) $('#factory .fmodes')?.insertAdjacentHTML('afterend', ch);
   $('#factory .fline:not(.fline-ghost)')?.classList.toggle('busy', !!r.factory_busy);
   const err = $('#ferr'); if (err) { err.textContent = r.factory_error || ''; err.hidden = !r.factory_error; }
   drawProgress(r);
@@ -295,6 +336,14 @@ async function saveFactory(r) {
       if (r.image_factory) { r.has_factory_img = true; r.image_factory = null; }
       const keys = [...new Set([...(r.state_keys || []), ...Object.keys(r.state_imgs || {})])];
       if (keys.length && j.states >= keys.length) { r.state_keys = keys; r.state_imgs = {}; }
+      r.factory_where = '';
+      for (const [m, v] of Object.entries(r.factories || {})) {
+        const got = j.variants?.[m]; if (!got) continue;
+        if (v.image_factory && got.floor) { v.has_factory_img = true; v.image_factory = null; }
+        const vk = [...new Set([...(v.state_keys || []), ...Object.keys(v.state_imgs || {})])];
+        if (vk.length && got.states >= vk.length) { v.state_keys = vk; v.state_imgs = {}; }
+        v.factory_where = m;
+      }
       if (state.result === r) {
         state.shortId = j.id;
         if (/\/s=/.test(location.hash)) history.replaceState(null, '', `#${encodeURIComponent(fileSlug())}/s=${j.id}`);
@@ -328,27 +377,31 @@ function renderFactory() {
   const box = $('#factory'); const r = state.result; if (!box || !r) return;
   const esc = escapeHTML; const f = r.factory;
   if (r.progress && !r.progress.end) tickProgress();
+  const modes = modesHTML(r);
   if (r.factory_busy === 'plan') {
-    box.innerHTML = `${progressHTML(r)}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p>${progButton('Planning…')}</div>`;
+    box.innerHTML = `${progressHTML(r)}${modes}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p>${progButton('Planning…')}</div>`;
     drawProgress(r);
     return;
   }
   if (!f) {
-    box.innerHTML = `<div class="fintro">
+    const m = modeOf(r.factory_mode);
+    box.innerHTML = `${modes}<div class="fintro">
       ${ghostLine(false)}
-      <h3>How would you make ${esc(r.title || 'this')}?</h3>
+      <h3>${r.factories && Object.keys(r.factories).length ? `${m.icon} The ${m.name.toLowerCase()} version of this factory` : `How would you make ${esc(r.title || 'this')}?`}</h3>
       <p>See what a factory for it would need, in the order it happens: the raw materials, which parts are made and which are bought, the machines, assembly, quality checks, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both. You also get a factory floor plan drawn to scale, and before and after pictures for every zone.</p>
       ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
-      ${state.key ? `<button type="button" class="btn btn-primary" id="factory-go">🏭 Plan the factory <small>${FACTORY_COST}</small></button>`
+      ${state.key ? `<button type="button" class="btn btn-primary" id="factory-go">${m.icon} Plan the ${m.name.toLowerCase()} factory <small>${FACTORY_COST}</small></button>`
         : `<button type="button" class="btn btn-ghost" id="factory-signin">Sign in to OpenRouter to plan it (${FACTORY_COST})</button><p class="hint">Or open the free <button type="button" class="link" id="factory-demo">scissors demo</button>, which has a factory built in.</p>`}
     </div>`;
+    wireModes(r);
     $('#factory-go')?.addEventListener('click', makeFactory);
     $('#factory-signin')?.addEventListener('click', signIn);
     $('#factory-demo')?.addEventListener('click', () => { $('#lang').value = 'English'; ask('scissors'); setTimeout(() => setView('factory'), 50); });
     return;
   }
   if (!f.applicable) {
-    box.innerHTML = `<div class="fintro"><h3>Nothing to manufacture here</h3><p>${esc(f.summary)}</p></div>`;
+    box.innerHTML = `${modes}<div class="fintro"><h3>Nothing to manufacture here</h3><p>${esc(f.summary)}</p></div>`;
+    wireModes(r);
     return;
   }
 
@@ -361,13 +414,15 @@ function renderFactory() {
   let stepNo = 0;
   const floorPic = factoryUrl(r);
 
-  box.innerHTML = `${progressHTML(r)}
+  box.innerHTML = `${progressHTML(r)}${modes}${compareHTML(r)}
     <p class="fsummary">${esc(f.summary)}</p>
     <div class="ftiles">
       <div class="ftile"><span>Output</span><b>${esc(f.output || '—')}</b></div>
       <div class="ftile"><span>Floor space</span><b>${lay ? `${fmtArea(lay.L * lay.W)} m²` : '—'}</b><small>${lay ? `${fmtM(lay.L)} × ${fmtM(lay.W)} m, ${fmtM(f.building.height_m)} m high` : ''}</small></div>
       <div class="ftile"><span>People</span><b>${staff} per shift</b><small>${f.shifts} shift${f.shifts > 1 ? 's' : ''} a day</small></div>
       <div class="ftile"><span>Automated</span><b>${pct('machine')}% of steps</b><small>${pct('both')}% shared, ${pct('human')}% by hand</small></div>
+      ${f.investment ? `<div class="ftile"><span>Investment</span><b>${esc(f.investment)}</b><small>machines and fit-out</small></div>` : ''}
+      ${f.unit_cost ? `<div class="ftile"><span>Cost to make one</span><b>${esc(f.unit_cost)}</b><small>materials, labour, machines</small></div>` : ''}
     </div>
 
     <h3 class="list-h">The line, in order</h3>
@@ -424,6 +479,7 @@ function renderFactory() {
   $$('.pdot', box).forEach((b) => b.addEventListener('click', () => { setView('exploded'); setTimeout(() => pingPart(Number(b.dataset.part)), 60); }));
   $('#factory-paint')?.addEventListener('click', paintFloor);
   $('#factory-states')?.addEventListener('click', makeStates);
+  wireModes(r);
   $$('.fplan [data-zone]', box).forEach((g) => hoverZone(g, r, Number(g.dataset.zone)));
   floorHotspots(r, floorPic);
   drawProgress(r);
@@ -453,6 +509,30 @@ function statesHTML(r, f) {
       <div class="fbarow">${pic(st, i, 'before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic(st, i, 'after')}</div>
     </article>`;
   }).join('')}</div>`;
+}
+
+function modesHTML(r) {
+  const cur = r.factory_mode || 'mixed'; const busy = !!r.factory_busy;
+  const has = (k) => (k === cur ? !!r.factory : !!r.factories?.[k]?.factory);
+  return `<div class="fmodes" role="tablist" aria-label="How automated">${MODES.map((m) => `<button type="button" role="tab" class="fmode${m.key === cur ? ' active' : ''}" data-mode="${m.key}" aria-selected="${m.key === cur}"${busy && m.key !== cur ? ' disabled' : ''}>
+    <span class="fm-ic">${m.icon}</span><b>${m.name}</b><small>${m.note}</small><em>${has(m.key) ? 'planned' : m.key === cur && busy ? 'planning…' : `not planned yet · ${FACTORY_COST}`}</em></button>`).join('')}</div>`;
+}
+function wireModes(r) { $$('#factory [data-mode]').forEach((b) => b.addEventListener('click', () => switchMode(r, b.dataset.mode))); }
+function compareHTML(r) {
+  const vs = allVersions(r); if (vs.length < 2) return '';
+  const cur = r.factory_mode || 'mixed'; const esc = escapeHTML;
+  const rows = [
+    ['People per shift', (s) => `${s.staff}${s.shifts > 1 ? ` <small>× ${s.shifts} shifts</small>` : ''}`],
+    ['Steps by machine alone', (s) => `${s.machine}%`],
+    ['Steps by hand', (s) => `${s.human}%`],
+    ['Floor space', (s) => (s.area ? `${fmtArea(s.area)} m²` : '—')],
+    ['Output', (s) => esc(s.output || '—')],
+    ['Investment', (s) => esc(s.investment || '—')],
+    ['Cost to make one', (s) => esc(s.unit_cost || '—')],
+  ];
+  const stats = vs.map((v) => ({ ...v, s: versionStats(v.f) }));
+  return `<div class="fcompare"><table><thead><tr><th></th>${stats.map((v) => `<th class="${v.mode.key === cur ? 'cur' : ''}">${v.mode.icon} ${v.mode.name}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(([label, fn]) => `<tr><th>${label}</th>${stats.map((v) => `<td class="${v.mode.key === cur ? 'cur' : ''}">${fn(v.s)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function floorHTML(r) {

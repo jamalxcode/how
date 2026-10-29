@@ -27,6 +27,7 @@ const DEMO = {
       summary: 'Steel strip is pressed into blade shapes, hardened and ground sharp; plastic handles are moulded on, then the halves are screwed together, tested and packed.',
       output: 'about 12,000 pairs a day',
       shifts: 2, workers_per_shift: 27,
+      investment: '$2.5–3.5 million', unit_cost: 'about $0.95 a pair',
       building: { length_m: 96, width_m: 40, height_m: 8 },
       materials: [
         { name: 'Stainless steel 420J2 strip, 2 mm', form: 'Coils of about 1 tonne', per_unit: '62 g', parts: [1, 2] },
