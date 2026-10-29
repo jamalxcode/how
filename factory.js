@@ -174,12 +174,12 @@ function renderFactory() {
   const box = $('#factory'); const r = state.result; if (!box || !r) return;
   const esc = escapeHTML; const f = r.factory;
   if (r.factory_busy === 'plan') {
-    box.innerHTML = `<div class="fintro"><div class="painting">${loaderSVG()}<p>Planning the factory: materials, machines, people, floor space (30–60 s)</p></div></div>`;
+    box.innerHTML = `<div class="fintro">${ghostLine(true)}<div class="painting">${loaderSVG()}<p>Planning the factory: materials, machines, people, floor space (30–60 s)</p></div></div>`;
     return;
   }
   if (!f) {
     box.innerHTML = `<div class="fintro">
-      <ol class="fline fline-ghost" aria-hidden="true">${STAGES.map((st) => `<li style="--c:${st.color};--t:${st.tint}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b></li>`).join('')}</ol>
+      ${ghostLine(false)}
       <h3>How would you make ${esc(r.title || 'this')}?</h3>
       <p>See what a factory for it would need, in the order it happens: the raw materials, which parts are made and which are bought, the machines, assembly, quality checks, packing and shipping. Every step is marked 🤖 machine, ✋ people or 🤝 both, and you get a factory floor plan drawn to scale.</p>
       ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
@@ -215,7 +215,7 @@ function renderFactory() {
     </div>
 
     <h3 class="list-h">The line, in order</h3>
-    <ol class="fline">${STAGES.map((st) => {
+    <ol class="fline${r.factory_busy ? ' busy' : ''}">${STAGES.map((st) => {
       const ss = f.steps.filter((s) => s.stage === st.key);
       const c = (k) => ss.filter((s) => s.who === k).length;
       return `<li style="--c:${st.color};--t:${st.tint}"><button type="button" data-go="${st.key}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b><small>${ss.length} step${ss.length === 1 ? '' : 's'}</small><span class="fwho">${['machine', 'both', 'human'].filter((k) => c(k)).map((k) => `${WHO[k].icon}${c(k)}`).join(' ')}</span></button></li>`;
@@ -266,6 +266,11 @@ function renderFactory() {
   $$('[data-go]', box).forEach((b) => b.addEventListener('click', () => $(`#fstage-${b.dataset.go}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
   $$('.pdot', box).forEach((b) => b.addEventListener('click', () => { setView('exploded'); setTimeout(() => pingPart(Number(b.dataset.part)), 60); }));
   $('#factory-paint')?.addEventListener('click', paintFloor);
+}
+
+// The seven stations without numbers: on the intro, and (with a moving belt) while the plan is made.
+function ghostLine(busy) {
+  return `<ol class="fline fline-ghost${busy ? ' busy' : ''}" aria-hidden="true">${STAGES.map((st) => `<li style="--c:${st.color};--t:${st.tint}"><span class="fic">${stageIcon(st)}</span><b>${st.name}</b></li>`).join('')}</ol>`;
 }
 
 function loaderSVG() {
