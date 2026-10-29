@@ -122,7 +122,9 @@ async function makeFactory() {
   const r = state.result; if (!r || r.factory_busy) return;
   if (!state.key) { showError('To plan a factory, sign in to OpenRouter first (top right). The scissors demo has one built in.'); $('#signin').focus(); return; }
   const ctrl = new AbortController(); r.factory_ctrl = ctrl;
-  r.factory_error = ''; r.factory_busy = 'plan'; renderFactoryIfShown(r);
+  r.factory_error = ''; r.factory_busy = 'plan';
+  startProgress(r, ['plan', 'floor', 'numbers', 'states', 'pics']); task(r, 'plan', 'run');
+  renderFactoryIfShown(r);
   const lang = r.lang || $('#lang').value;
   try {
     const f = await askLongJSON({ model: PLAN_MODEL, maxTokens: 12000, schema: FACTORY_SCHEMA, signal: ctrl.signal, messages: [
@@ -132,31 +134,43 @@ async function makeFactory() {
     r.factory = cleanFactory(f, (r.parts || []).length);
     r.image_factory = null; r.has_factory_img = false; r.floor_badges = undefined;
     r.factory_busy = r.factory?.applicable ? 'all' : null;
+    task(r, 'plan', 'done');
     renderFactoryIfShown(r);
     if (r.factory_busy) {
-      const floor = r.factory.floor_prompt ? paint(r.factory.floor_prompt, ctrl.signal).then(async (img) => { r.image_factory = img; r.floor_badges = await locateBadges(img, r.factory.zones.length, ctrl.signal); renderFactoryIfShown(r); }) : Promise.resolve();
+      const floor = r.factory.floor_prompt ? paintFloorAndNumbers(r, ctrl.signal) : Promise.resolve(task(r, 'floor', 'done'), task(r, 'numbers', 'done'));
       const [a, b] = await Promise.allSettled([floor, paintStates(r, ctrl.signal)]);
       if ([a, b].some((x) => x.status === 'rejected' && x.reason?.name === 'AbortError')) throw new DOMException('Cancelled', 'AbortError');
       r.factory_error = [a.status === 'rejected' ? `The floor picture failed: ${a.reason?.message}` : '', b.value || (b.status === 'rejected' ? b.reason?.message : '')].filter(Boolean).join(' ');
     }
   } catch (e) {
-    if (e?.name === 'AbortError') { r.factory_busy = null; return; }
-    if (!r.factory) r.factory_error = e.message;
+    if (e?.name === 'AbortError') { r.factory_busy = null; r.progress = null; return; }
+    if (!r.factory) { r.factory_error = e.message; r.progress = null; }
   }
   r.factory_busy = null;
-  renderFactoryIfShown(r);
+  endProgress(r);
+  if (r.factory?.applicable && state.result === r && $('#fstates')) refreshFactory(r); else renderFactoryIfShown(r);
   await saveFactory(r);
+}
+async function paintFloorAndNumbers(r, signal) {
+  task(r, 'floor', 'run');
+  try { r.image_factory = await paint(r.factory.floor_prompt, signal); } catch (e) { task(r, 'floor', 'fail'); task(r, 'numbers', 'fail'); throw e; }
+  task(r, 'floor', 'done'); task(r, 'numbers', 'run');
+  fillFloor(r);
+  r.floor_badges = await locateBadges(r.image_factory, r.factory.zones.length, signal);
+  task(r, 'numbers', 'done');
+  fillFloor(r);
 }
 
 async function paintFloor() {
   const r = state.result; if (!r?.factory?.floor_prompt || r.factory_busy) return;
   if (!state.key) { showError('To paint the factory floor, sign in to OpenRouter first (top right).'); return; }
   const ctrl = new AbortController(); r.factory_ctrl = ctrl;
-  r.factory_busy = 'paint'; r.factory_error = ''; renderFactoryIfShown(r);
-  try { r.image_factory = await paint(r.factory.floor_prompt, ctrl.signal); r.floor_badges = await locateBadges(r.image_factory, r.factory.zones.length, ctrl.signal); }
+  r.factory_busy = 'paint'; r.factory_error = '';
+  startProgress(r, ['floor', 'numbers']); refreshFactory(r);
+  try { await paintFloorAndNumbers(r, ctrl.signal); }
   catch (e) { if (e?.name !== 'AbortError') r.factory_error = e.message; }
   r.factory_busy = null;
-  renderFactoryIfShown(r);
+  endProgress(r); refreshFactory(r);
   if (r.image_factory) await saveFactory(r);
 }
 
@@ -198,11 +212,12 @@ async function makeStates() {
   const r = state.result; const f = r?.factory; if (!f || r.factory_busy) return;
   if (!state.key) { showError('To paint the before and after pictures, sign in to OpenRouter first (top right).'); $('#signin').focus(); return; }
   const ctrl = new AbortController(); r.factory_ctrl = ctrl;
-  r.factory_busy = 'states'; r.factory_error = ''; renderFactoryIfShown(r);
+  r.factory_busy = 'states'; r.factory_error = '';
+  startProgress(r, ['states', 'pics']); refreshFactory(r);
   try { r.factory_error = await paintStates(r, ctrl.signal); }
-  catch (e) { if (e?.name === 'AbortError') { r.factory_busy = null; return; } r.factory_error = e.message; }
+  catch (e) { if (e?.name === 'AbortError') { r.factory_busy = null; r.progress = null; return; } r.factory_error = e.message; }
   r.factory_busy = null;
-  renderFactoryIfShown(r);
+  endProgress(r); refreshFactory(r);
   await saveFactory(r);
 }
 // Describe each zone's before and after (once), then paint every picture still missing.
@@ -211,33 +226,59 @@ async function paintStates(r, signal) {
   const f = r.factory; let failed = 0;
   {
     if (!f.states?.length) {
+      task(r, 'states', 'run');
       const j = await askLongJSON({ model: PLAN_MODEL, maxTokens: 10000, schema: STATES_SCHEMA, signal, messages: [
         { role: 'system', content: statesPrompt(r.lang || $('#lang').value, $('#level').value, r) },
         { role: 'user', content: `Before and after for each zone of the ${r.title} factory.` },
       ] });
       f.states = cleanStates(j.zones, f.zones.length);
-      renderFactoryIfShown(r);
     }
+    task(r, 'states', 'done');
     const jobs = [];
     f.states.forEach((st, i) => {
       jobs.push({ key: stateKey(st, i, 'after'), prompt: st.after.prompt });
       if (!st.before_from) jobs.push({ key: stateKey(st, i, 'before'), prompt: st.before.prompt });
     });
-    r.state_imgs = r.state_imgs || {};
-    await inPool(jobs.filter((j) => j.prompt && !stateUrl(r, j.key)), 4, async (j) => {
+    r.state_imgs = r.state_imgs || {}; r.state_running = new Set();
+    const todo = jobs.filter((j) => j.prompt && !stateUrl(r, j.key));
+    let done = 0;
+    task(r, 'pics', 'run', { total: todo.length, done });
+    fillStates(r);
+    await inPool(todo, PIC_LANES, async (j) => {
+      r.state_running.add(j.key); fillState(r, j.key);
       try {
         r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'medium' }));
-        fillState(r, j.key);
       } catch (e) { if (e?.name === 'AbortError') throw e; failed++; }
+      r.state_running.delete(j.key); fillState(r, j.key);
+      task(r, 'pics', null, { done: ++done });
     });
+    task(r, 'pics', 'done');
   }
   return failed ? `${failed} before/after picture${failed > 1 ? 's' : ''} could not be painted. Press “Paint the missing pictures” to try again.` : '';
 }
 // Put a finished picture in place without redrawing the whole tab.
 function fillState(r, key) {
   if (state.result !== r) return;
+  $$(`[data-skey="${key}"]`).forEach((el) => { const t = tile(r, key, el.dataset.alt || ''); el.className = `fbimg ${t.cls}`; el.innerHTML = t.html; });
+}
+function tile(r, key, alt) {
   const url = stateUrl(r, key);
-  $$(`[data-skey="${key}"]`).forEach((el) => { el.classList.remove('waiting'); el.innerHTML = ''; const img = document.createElement('img'); img.src = url; img.alt = el.dataset.alt || ''; img.decoding = 'async'; el.appendChild(img); });
+  if (url) return { cls: '', html: `<img src="${escapeHTML(url)}" alt="${escapeHTML(alt)}" decoding="async">` };
+  if (r.state_running?.has(key)) return { cls: 'waiting', html: '<span>Painting now…</span>' };
+  if (r.factory_busy === 'states' || r.factory_busy === 'all') return { cls: 'queued', html: '<span>In the queue</span>' };
+  return { cls: '', html: '<span>—</span>' };
+}
+// Swap in the parts that change while the pictures come in, leaving the rest of the tab (and the
+// reader's place in it) alone.
+function fillStates(r) { const el = $('#fstates'); if (el && state.result === r) { el.innerHTML = statesHTML(r, r.factory); $('#factory-states')?.addEventListener('click', makeStates); } }
+function fillFloor(r) { const el = $('#ffloor-slot'); if (el && state.result === r) { el.innerHTML = floorHTML(r); $('#factory-paint')?.addEventListener('click', paintFloor); floorHotspots(r, factoryUrl(r)); } }
+function refreshFactory(r) {
+  if (state.result !== r || $('#view-factory').hidden) return;
+  if (!$('#fstates')) { renderFactory(); return; }
+  fillFloor(r); fillStates(r);
+  $('#factory .fline:not(.fline-ghost)')?.classList.toggle('busy', !!r.factory_busy);
+  const err = $('#ferr'); if (err) { err.textContent = r.factory_error || ''; err.hidden = !r.factory_error; }
+  drawProgress(r);
 }
 
 // Store the page again with its factory, so the share link and the gallery carry it. The existing
@@ -286,8 +327,10 @@ const fmtArea = (x) => Math.round(x).toLocaleString('en');
 function renderFactory() {
   const box = $('#factory'); const r = state.result; if (!box || !r) return;
   const esc = escapeHTML; const f = r.factory;
+  if (r.progress && !r.progress.end) tickProgress();
   if (r.factory_busy === 'plan') {
-    box.innerHTML = `<div class="fintro">${ghostLine(true)}<div class="painting">${loaderSVG()}<p>Planning the factory: materials, machines, people, floor space (30–60 s)</p></div></div>`;
+    box.innerHTML = `${progressHTML(r)}<div class="fintro">${ghostLine(true)}<p>Working out the materials, machines, people and floor space. The rest of the page appears as soon as the plan is ready, and the pictures fill in while you look around.</p></div>`;
+    drawProgress(r);
     return;
   }
   if (!f) {
@@ -318,7 +361,7 @@ function renderFactory() {
   let stepNo = 0;
   const floorPic = factoryUrl(r);
 
-  box.innerHTML = `
+  box.innerHTML = `${progressHTML(r)}
     <p class="fsummary">${esc(f.summary)}</p>
     <div class="ftiles">
       <div class="ftile"><span>Output</span><b>${esc(f.output || '—')}</b></div>
@@ -339,10 +382,8 @@ function renderFactory() {
     </div>
 
     <h3 class="list-h">Factory floor</h3>
-    ${floorPic ? `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(floorPic)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>Painted overview: an impression, not to scale. Point at (or tap) a number to see what that zone does.</figcaption></figure>`
-      : r.factory_busy === 'paint' || r.factory_busy === 'all' ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Painting the factory floor (20–40 s)</p></div></div>`
-      : f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : ''}
-    ${r.factory_error ? `<p class="ferror">${esc(r.factory_error)}</p>` : ''}
+    <div id="ffloor-slot">${floorHTML(r)}</div>
+    <p class="ferror" id="ferr"${r.factory_error ? '' : ' hidden'}>${esc(r.factory_error || '')}</p>
     ${lay ? `<figure class="ffig"><div class="stage fplan-scroll">${floorPlanSVG(f, lay)}</div><figcaption>Floor plan drawn to scale from the zone sizes. Material flows along the arrows, from IN to OUT; letters are machines, listed below. Point at (or tap) a zone to see its before and after.<span class="fswipe"> Swipe sideways to see all of it.</span></figcaption></figure>` : ''}
     <div class="ftable-wrap"><table class="ftable">
       <thead><tr><th>#</th><th>Zone</th><th>Size</th><th>Machines (footprint each)</th><th>Staff</th></tr></thead>
@@ -354,7 +395,7 @@ function renderFactory() {
     </table></div>
 
     <h3 class="list-h">Zone by zone: before → after</h3>
-    ${statesHTML(r, f)}
+    <div id="fstates">${statesHTML(r, f)}</div>
 
     <h3 class="list-h">Step by step, from raw material to truck</h3>
     <div class="ftimeline">${STAGES.map((st, si) => {
@@ -385,6 +426,7 @@ function renderFactory() {
   $('#factory-states')?.addEventListener('click', makeStates);
   $$('.fplan [data-zone]', box).forEach((g) => hoverZone(g, r, Number(g.dataset.zone)));
   floorHotspots(r, floorPic);
+  drawProgress(r);
 }
 
 // The seven stations without numbers: on the intro, and (with a moving belt) while the plan is made.
@@ -399,10 +441,10 @@ function statesHTML(r, f) {
     : !sts.length || missing ? (state.key
       ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${sts.length ? 'Paint the missing pictures' : 'Show what goes in and comes out of each zone'} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
       : `<p class="hint fpaint">Sign in to OpenRouter (top right) to paint a before and after picture for every zone (${STATES_COST}).</p>`) : '';
-  if (!sts.length) return busy ? `<div class="stage"><div class="painting">${loaderSVG()}<p>Working out what each zone does to the work</p></div></div>` : button;
+  if (!sts.length) return busy ? `<p class="fwait">Working out what each zone takes in and sends out… the pictures follow.</p>` : button;
   const pic = (st, i, which) => {
-    const key = stateKey(st, i, which); const url = stateUrl(r, key); const lab = st[which].label;
-    return `<figure><div class="fbimg${url ? '' : busy ? ' waiting' : ''}" data-skey="${key}" data-alt="${esc(lab)}">${url ? `<img src="${esc(url)}" alt="${esc(lab)}" decoding="async">` : busy ? '<span>Painting…</span>' : '<span>—</span>'}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(lab)}</figcaption></figure>`;
+    const key = stateKey(st, i, which); const lab = st[which].label; const t = tile(r, key, lab);
+    return `<figure><div class="fbimg ${t.cls}" data-skey="${key}" data-alt="${esc(lab)}">${t.html}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(lab)}</figcaption></figure>`;
   };
   return `${button}<div class="fba">${f.zones.map((z, i) => {
     const st = sts[i]; if (!st) return ''; const sg = stageOf(z.stage);
@@ -411,6 +453,78 @@ function statesHTML(r, f) {
       <div class="fbarow">${pic(st, i, 'before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic(st, i, 'after')}</div>
     </article>`;
   }).join('')}</div>`;
+}
+
+function floorHTML(r) {
+  const esc = escapeHTML; const f = r.factory; const url = factoryUrl(r);
+  if (url) return `<figure class="ffig"><div class="stage"><div class="ffloor" id="ffloor"><img src="${esc(url)}" alt="${esc(r.title)} factory floor, painted overview" decoding="async"></div></div><figcaption>Painted overview: an impression, not to scale. Point at (or tap) a number to see what that zone does.</figcaption></figure>`;
+  if (r.factory_busy === 'paint' || r.factory_busy === 'all') return `<div class="stage ffloor-wait"><div class="painting">${loaderSVG()}<p>Painting the factory floor</p></div></div>`;
+  return f.floor_prompt && state.key ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-paint">🎨 Paint an overview of the floor <small>~4¢</small></button></p>` : '';
+}
+
+// ---------- progress: what is done, what is left, about how long ----------
+const TASKS = {
+  plan: { label: 'Plan the factory', est: 50, lane: 0 },
+  floor: { label: 'Paint the floor', est: 35, lane: 1 },
+  numbers: { label: 'Find the zone numbers', est: 6, lane: 1 },
+  states: { label: 'Describe each zone', est: 30, lane: 2 },
+  pics: { label: 'Paint before & after', est: 0, lane: 2 },
+};
+const PIC_LANES = 4, PIC_SECS = 22;
+function startProgress(r, keys) {
+  r.progress = { t0: Date.now(), tasks: keys.map((key) => ({ key, ...TASKS[key], status: 'wait', since: 0, done: 0, total: 0 })) };
+  tickProgress();
+}
+function task(r, key, status, extra = {}) {
+  const t = r.progress?.tasks.find((x) => x.key === key); if (!t) return;
+  if (status && status !== t.status) { t.status = status; t.since = Date.now(); }
+  Object.assign(t, extra);
+  drawProgress(r);
+}
+function endProgress(r) {
+  if (!r.progress) return;
+  r.progress.end = Date.now();
+  r.progress.tasks.forEach((t) => { if (t.status === 'run' || t.status === 'wait') t.status = 'fail'; });
+  drawProgress(r);
+  setTimeout(() => { if (r.progress?.end) { r.progress = null; if (state.result === r) $('#fprog')?.remove(); } }, 6000);
+}
+// Seconds left on one task; the floor and the before/after pictures run side by side, after the plan.
+function taskLeft(t, r) {
+  if (t.status === 'done' || t.status === 'fail') return 0;
+  if (t.key === 'pics') {
+    const left = t.total ? t.total - t.done : Math.ceil((r.factory?.zones.length || 8) * 1.4);
+    // once a couple are back, go by how fast they are really coming
+    if (t.status === 'run' && t.done >= 2) return Math.max(left * ((Date.now() - t.since) / 1000 / t.done), left ? 3 : 0);
+    return Math.ceil(left / PIC_LANES) * PIC_SECS;
+  }
+  if (t.status === 'run') return Math.max(t.est - (Date.now() - t.since) / 1000, 4);
+  return t.est;
+}
+function fmtSecs(s) { s = Math.max(0, Math.round(s)); return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`; }
+function progressHTML(r) { return r.progress ? '<div class="fprog" id="fprog" aria-live="polite"></div>' : ''; }
+function drawProgress(r) {
+  const el = $('#fprog'); const p = r.progress; if (!el || !p || state.result !== r) return;
+  const ts = p.tasks; const lane = (k) => ts.filter((t) => t.lane === k).reduce((a, t) => a + taskLeft(t, r), 0);
+  const left = lane(0) + Math.max(lane(1), lane(2));
+  const elapsed = ((p.end || Date.now()) - p.t0) / 1000;
+  const frac = p.end ? 1 : Math.min(0.97, elapsed / (elapsed + left));
+  const doneN = ts.filter((t) => t.status === 'done').length;
+  const failed = ts.some((t) => t.status === 'fail');
+  el.classList.toggle('finished', !!p.end);
+  el.innerHTML = `<div class="fprog-top"><b>${p.end ? (failed ? 'Finished, with a few gaps' : 'All done') : 'Building the factory page'}</b>
+      <span>${p.end ? `in ${fmtSecs(elapsed)}` : `${doneN} of ${ts.length} steps done · about ${fmtSecs(left)} left`}</span></div>
+    <div class="fprog-bar"><i style="width:${Math.round(frac * 100)}%"></i></div>
+    <ol class="fprog-steps">${ts.map((t) => `<li class="${t.status}"><span class="fprog-ic">${t.status === 'done' ? '✓' : t.status === 'fail' ? '!' : t.status === 'run' ? '' : '·'}</span>${t.label}${t.key === 'pics' && t.total ? ` <small>${t.done} of ${t.total}</small>` : ''}</li>`).join('')}</ol>
+    ${p.end ? '' : `<p class="fprog-hint">${ts.some((t) => t.key === 'plan' && t.status !== 'done') ? 'The page appears as soon as the plan is ready; then you can look around while the pictures are painted.' : 'Look around while it works: the plan, floor plan and zone list are ready, and each picture appears as soon as it is painted.'}</p>`}`;
+}
+let progTimer = null;
+function tickProgress() {
+  if (progTimer) return;
+  progTimer = setInterval(() => {
+    const r = state.result;
+    if (!r?.progress || r.progress.end) { clearInterval(progTimer); progTimer = null; return; }
+    drawProgress(r);
+  }, 1000);
 }
 
 // ---------- point at a zone (plan or painted floor) → its before and after ----------
@@ -434,15 +548,15 @@ function showZoneTip(e, r, n) {
   const f = r.factory; const z = f?.zones?.[n - 1]; if (!z) return;
   const esc = escapeHTML; const sg = stageOf(z.stage); const st = f.states?.[n - 1];
   const pic = (which) => {
-    const url = st && stateUrl(r, stateKey(st, n - 1, which));
-    return `<figure><div class="fbimg">${url ? `<img src="${esc(url)}" alt="">` : '<span>—</span>'}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
+    const t = st ? tile(r, stateKey(st, n - 1, which), '') : { cls: '', html: '<span>—</span>' };
+    return `<figure><div class="fbimg ${t.cls}">${t.html}</div><figcaption><small>${which === 'before' ? 'Before' : 'After'}</small>${esc(st?.[which].label || '')}</figcaption></figure>`;
   };
   const t = zoneTip();
   t.style.setProperty('--c', sg.color); t.style.setProperty('--t', sg.tint);
   t.setAttribute('dir', $('#result').getAttribute('dir') || 'ltr');
   t.innerHTML = `<header><span class="znum">${n}</span><b>${esc(z.name)}</b><small>${fmtM(z.length_m)} × ${fmtM(z.width_m)} m · ${z.staff} staff</small></header>
     ${st ? `<div class="fbarow">${pic('before')}<div class="fbarrow"><span aria-hidden="true">→</span><p>${esc(st.change)}</p></div>${pic('after')}</div>`
-      : `<p class="ztip-none">${r.factory_busy ? 'The before and after pictures are on their way.' : 'No before and after pictures for this plan yet: use the button under the zone list.'}</p>`}`;
+      : `<p class="ztip-none">${r.factory_busy ? 'Working out what this zone takes in and sends out; its pictures follow.' : 'No before and after pictures for this plan yet: use the button under the zone list.'}</p>`}`;
   t.hidden = false; moveZoneTip(e);
 }
 function moveZoneTip(e) {

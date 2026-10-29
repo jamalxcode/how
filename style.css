@@ -526,3 +526,29 @@ body.has-result .hero-sub { display: none; }
 .ztip[dir="rtl"] header small { padding-left: 0; padding-right: 32px; }
 .ztip[dir="rtl"] .fbarrow span { transform: scaleX(-1); }
 @media (prefers-reduced-motion: reduce) { .ztip { animation: none; } }
+
+/* progress while the factory page is being made */
+.fprog { position: sticky; top: 8px; z-index: 6; background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; padding: 10px 14px 10px; margin: 0 0 14px; box-shadow: var(--shadow); }
+.fprog-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; }
+.fprog-top b { font-family: var(--font-display); font-size: 17px; }
+.fprog-top span { color: var(--ink-2); font-size: 14px; font-variant-numeric: tabular-nums; }
+.fprog-bar { height: 10px; border-radius: 999px; background: var(--paper-2); border: 1.5px solid var(--line); overflow: hidden; margin: 8px 0; }
+.fprog-bar i { display: block; height: 100%; background: repeating-linear-gradient(135deg, var(--red) 0 10px, var(--red-dark) 10px 20px); background-size: 28px 28px; animation: wait 1s linear infinite; transition: width .8s ease; }
+.fprog.finished .fprog-bar i { background: #3a8a4c; animation: none; }
+.fprog-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13.5px; color: var(--muted); }
+.fprog-steps li { display: inline-flex; align-items: center; gap: 6px; }
+.fprog-steps li.run { color: var(--ink); font-weight: 800; }
+.fprog-steps li.done { color: var(--ink-2); }
+.fprog-steps li.fail { color: var(--red-dark); }
+.fprog-steps small { font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.fprog-ic { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 11px; font-weight: 900; }
+.fprog-steps li.done .fprog-ic { background: #3a8a4c; border-color: #3a8a4c; color: #fff; }
+.fprog-steps li.fail .fprog-ic { background: var(--red-dark); border-color: var(--red-dark); color: #fff; }
+.fprog-steps li.run .fprog-ic { border-color: var(--line); border-top-color: var(--red); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fprog-hint { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.fbimg.queued { background: var(--paper-2); border-style: dashed; color: var(--muted); }
+.fwait { color: var(--ink-2); font-style: italic; text-align: center; padding: 18px 0; }
+.ffloor-wait { aspect-ratio: 3 / 2; display: grid; place-items: center; }
+@media (max-width: 560px) { .fprog { top: 4px; padding: 8px 10px; } .fprog-steps { font-size: 12.5px; gap: 2px 10px; } .fprog-hint { display: none; } }
+@media (prefers-reduced-motion: reduce) { .fprog-bar i, .fprog-steps li.run .fprog-ic { animation: none; } }
