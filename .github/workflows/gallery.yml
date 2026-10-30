@@ -18,6 +18,10 @@ on:
         description: Stop starting new items after this many US dollars
         required: false
         default: '15'
+      check_only:
+        description: Only check that both secrets work (free, makes nothing)
+        type: boolean
+        default: false
 permissions: { contents: read }
 jobs:
   make:
@@ -27,7 +31,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - run: npm install --no-save --no-package-lock playwright@1.48.2 && npx playwright install --with-deps chromium
+      - if: ${{ !inputs.check_only }}
+        run: npm install --no-save --no-package-lock playwright@1.48.2 && npx playwright install --with-deps chromium
       - run: node scripts/make-gallery.mjs
         env:
           OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
@@ -35,3 +40,4 @@ jobs:
           ITEMS: ${{ inputs.items }}
           REGION: ${{ inputs.region }}
           MAX_SPEND: ${{ inputs.max_spend }}
+          CHECK_ONLY: ${{ inputs.check_only }}

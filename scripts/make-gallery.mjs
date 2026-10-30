@@ -6,8 +6,8 @@
 //
 // About 30¢ and 5–10 minutes per thing. Optional: ITEMS="kettle, bicycle" (default: the list below), REGION (Money tab), MAX_SPEND in US
 // dollars (default 15: stops before starting a new item once spent), HOW_SITE (default the live site).
-// Runs from GitHub Actions too: see .github/workflows/gallery.yml.
-import { chromium } from 'playwright';
+// CHECK_ONLY=true checks both secrets without spending anything. Runs from GitHub Actions too: see
+// .github/workflows/gallery.yml.
 
 export const DEFAULT_ITEMS = ['kettle', 'toaster', 'bicycle', 'can opener', 'zipper', 'electric motor', 'ballpoint pen', 'umbrella', 'padlock',
   'stapler', 'flashlight', 'ceiling fan', 'refrigerator', 'internal combustion engine', 'toilet flush', 'computer mouse', 'electric toothbrush', 'pressure cooker'];
@@ -34,13 +34,32 @@ export async function makeOne(page, item, { region, log = console.log } = {}) {
   return out;
 }
 
+// Free check of both secrets: OpenRouter describes the key; the link service answers "unknown id"
+// to a gallery add with the right admin secret (and "not allowed" with a wrong one).
+async function check(key, admin) {
+  let ok = true;
+  const k = await fetch('https://openrouter.ai/api/v1/key', { headers: { Authorization: `Bearer ${key}` } });
+  const kj = await k.json().catch(() => ({}));
+  if (k.ok) {
+    const d = kj.data || {};
+    console.log(`OPENROUTER_KEY works: "${d.label || 'key'}", used $${Number(d.usage || 0).toFixed(2)}${d.limit != null ? ` of a $${d.limit} limit` : ', no limit set'}.`);
+  } else { ok = false; console.log(`OPENROUTER_KEY does not work (${k.status}: ${kj.error?.message || 'rejected'}).`); }
+  const g = await fetch('https://how-links.jamal-akuna-matata.workers.dev/gallery', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin': admin }, body: JSON.stringify({ id: 'zzzzz', title: 'check' }) });
+  if (g.status === 404) console.log('HOW_ADMIN_SECRET works: the link service accepted it.');
+  else if (g.status === 403) { ok = false; console.log('HOW_ADMIN_SECRET is wrong: the link service refused it. Make it match ADMIN_SECRET in Cloudflare.'); }
+  else { ok = false; console.log(`HOW_ADMIN_SECRET: unexpected answer ${g.status} from the link service.`); }
+  return ok;
+}
+
 async function main() {
   const key = process.env.OPENROUTER_KEY, admin = process.env.HOW_ADMIN_SECRET;
-  if (!key || !admin) { console.error('Set OPENROUTER_KEY and HOW_ADMIN_SECRET.'); process.exit(1); }
+  if (!key || !admin) { console.error(`Missing secret: ${[!key && 'OPENROUTER_KEY', !admin && 'HOW_ADMIN_SECRET'].filter(Boolean).join(' and ')}.`); process.exit(1); }
+  if (process.env.CHECK_ONLY === 'true') process.exit((await check(key, admin)) ? 0 : 1);
   const site = process.env.HOW_SITE || 'https://how.sala.company/';
   const region = process.env.REGION || 'Gulf (Kuwait, UAE, Saudi Arabia)';
   const maxSpend = Number(process.env.MAX_SPEND || 15);
   const items = (process.env.ITEMS || DEFAULT_ITEMS.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
+  const { chromium } = await import('playwright'); // only needed for a full run
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
   await ctx.addInitScript(([k, a, reg]) => { localStorage.setItem('or_key', k); localStorage.setItem('how_admin', a); localStorage.setItem('how_region', reg); }, [key, admin, region]);
