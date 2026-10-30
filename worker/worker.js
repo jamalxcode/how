@@ -405,6 +405,6 @@ async function handle(req, env) {
         variants: Object.fromEntries(vNames.map((m) => [m, { floor: !!variants[m].floor, states: Object.keys(variants[m].pics).length }])) }, 200, h);
     }
 
-    return json({ ok: true, service: 'how-links', admin: !!env.ADMIN_SECRET }, 200, h);
+    return json({ ok: true, service: 'how-links', version: 2, admin: !!env.ADMIN_SECRET }, 200, h);
   }
 }
