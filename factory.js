@@ -289,19 +289,38 @@ async function makeStates() {
 async function paintStates(r, signal) {
   const f = r.factory; let failed = 0;
   {
-    if (!f.states?.length) {
+    // no descriptions yet, or fewer than there are zones: (re)describe them all
+    if (!f.states?.length || f.states.length < f.zones.length) {
       task(r, 'states', 'run');
       const j = await askLongJSON({ model: PLAN_MODEL, maxTokens: 10000, schema: STATES_SCHEMA, signal, messages: [
         cachedSystem(STATES_RULES),
         { role: 'user', content: statesRequest(r.lang || $('#lang').value, $('#level').value, r) },
       ] });
       f.states = cleanStates(j.zones, f.zones.length);
+      if (f.states.length < f.zones.length) { // too few: ask once more
+        const j2 = await askLongJSON({ model: PLAN_MODEL, maxTokens: 10000, schema: STATES_SCHEMA, signal, messages: [
+          cachedSystem(STATES_RULES),
+          { role: 'user', content: `${statesRequest(r.lang || $('#lang').value, $('#level').value, r)}\nThere are ${f.zones.length} zones: give exactly ${f.zones.length} entries.` },
+        ] }).catch((e) => { if (e?.name === 'AbortError') throw e; return null; });
+        const again = cleanStates(j2?.zones, f.zones.length);
+        if (again.length > f.states.length) f.states = again;
+      }
+    }
+    // still short: the remaining zones get plain pictures from their names
+    for (let i = f.states.length; i < f.zones.length; i++) {
+      const z = f.zones[i];
+      f.states.push({ change: '', before_from: i > 0 ? i : 0, before: { label: z.name, prompt: '', same_as: '' }, after: { label: z.name, prompt: '', same_as: '' } });
     }
     task(r, 'states', 'done');
+    // a picture borrowed from another version that does not exist there is painted here instead
+    f.states.forEach((st) => ['before', 'after'].forEach((w) => { if (st[w]?.same_as && !stateUrl(r, st[w].same_as)) st[w].same_as = ''; }));
+    const thing = r.title_en || r.wikipedia_title || r.title;
     const jobs = [];
     f.states.forEach((st, i) => {
-      jobs.push({ key: stateKey(st, i, 'after', f.states), prompt: st.after.prompt });
-      if (!st.before_from) jobs.push({ key: stateKey(st, i, 'before', f.states), prompt: st.before.prompt });
+      for (const w of st.before_from ? ['after'] : ['after', 'before']) {
+        // an empty description still gets a picture, from its label
+        jobs.push({ key: stateKey(st, i, w, f.states), prompt: st[w].prompt || `${thing}: ${st[w].label || f.zones[i]?.name_en || ''}, ${w === 'before' ? 'as it arrives at' : 'as it leaves'} the ${f.zones[i]?.name_en || 'zone'}.` });
+      }
     });
     r.state_imgs = r.state_imgs || {}; r.state_running = new Set();
     const todo = jobs.filter((j) => j.prompt && !j.key.includes(':') && !stateUrl(r, j.key));
@@ -525,7 +544,7 @@ function ghostLine(busy) {
 
 function statesHTML(r, f) {
   const esc = escapeHTML; const sts = f.states || []; const busy = r.factory_busy === 'states' || r.factory_busy === 'all';
-  const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before', sts), stateKey(st, i, 'after', sts)].filter((k) => !stateUrl(r, k)).length, 0) : 0;
+  const missing = sts.length ? sts.reduce((a, st, i) => a + [stateKey(st, i, 'before', sts), stateKey(st, i, 'after', sts)].filter((k) => !stateUrl(r, k)).length, 0) + 2 * Math.max(0, f.zones.length - sts.length) : 0;
   const button = busy ? progButton(tx(sts.length ? 'paintingBtn' : 'describingBtn'))
     : !sts.length || missing ? (state.key
       ? `<p class="fpaint"><button type="button" class="btn btn-ghost btn-sm" id="factory-states">🖼 ${tx(sts.length ? 'paintMissing' : 'showInOut')} <small>${sts.length ? '' : STATES_COST}</small></button></p>`
