@@ -4,6 +4,8 @@
 const API = 'https://how-links.jamal-akuna-matata.workers.dev';
 const id = (process.env.PAGE || '').replace(/^.*s=/, '').trim();
 if (!/^[a-z0-9]{5,12}$/.test(id)) { console.error('Set PAGE to a page id or share link.'); process.exit(1); }
+const about = await (await fetch(`${API}/`)).json().catch(() => ({}));
+console.log(`Link service version: ${about.version || '1 (old: copies every picture on every save)'}\n`);
 const page = await (await fetch(`${API}/${id}`)).json();
 console.log(`${page.title} · shown version: ${page.factory_mode || '-'} · other versions: ${Object.keys(page.factories || {}).join(', ') || 'none'}`);
 const versions = { [page.factory_mode || 'mixed']: { factory: page.factory, state_keys: page.state_keys, where: '' } };
