@@ -333,7 +333,7 @@ let featuresLoading = null;
 function loadFeatures() {
   if (typeof renderMoney === 'function') return Promise.resolve();
   const add = (src) => new Promise((ok, no) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => no(new Error('Could not load this tab. Check your connection and try again.')); document.body.appendChild(el); });
-  return (featuresLoading = featuresLoading || add('factory.js?v=12').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
+  return (featuresLoading = featuresLoading || add('factory.js?v=13').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
 }
 // A language's labels arrived after the page was drawn: put them in place.
 function relabel() {
@@ -342,9 +342,8 @@ function relabel() {
   $$('[data-i18n]').forEach((el) => { el.textContent = tx(el.dataset.i18n); });
   $('#fact').dataset.label = tx('didYouKnow');
   if (!$('#flag').disabled) $('#flag').textContent = tx('somethingWrong');
-  if (!$('#tab-factory').classList.contains('prog')) $('#tab-factory').textContent = tx('tab_factory');
   $$('.ask-more').forEach((b) => { b.textContent = tx('howDoesThisWork'); });
-  const v = $('.tab.active')?.dataset.view; if (v === 'factory' || v === 'money') setView(v);
+  story.drawn.forEach((v) => renderChapter(v));
 }
 // Which tabs people open (once per page and tab), next to the answers in GoatCounter.
 const tabsCounted = new Set();
@@ -443,7 +442,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   $('#tab-factory').hidden = result.kind === 'refused';
   $('#tab-money').hidden = result.kind === 'refused';
   if (result.financials && typeof cleanMoney === 'function') result.financials = cleanMoney(result.financials);
-  $('#tab-factory').classList.remove('prog'); $('#tab-factory').textContent = tx('tab_factory');
+  $('#tab-factory').classList.remove('prog'); $('#tab-factory .chap-pct').textContent = '';
   const demoOf = typeof DEMO !== 'undefined' && (result.lang || 'English') === 'English' && DEMO[(result.title || '').toLowerCase()];
   if (demoOf && demoOf !== result) { if (!result.factory && demoOf.factory) result.factory = JSON.parse(JSON.stringify(demoOf.factory)); if (!result.financials && demoOf.financials) result.financials = JSON.parse(JSON.stringify(demoOf.financials)); }
   if (result.factory && typeof cleanFactory === 'function') result.factory = cleanFactory(result.factory, (result.parts || []).length);
@@ -474,8 +473,13 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
     steps.appendChild(li);
   });
 
-  setView(state.pendingView || 'exploded'); state.pendingView = null;
-  $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const pending = state.pendingView; state.pendingView = null;
+  $('#factory').innerHTML = ''; $('#money').innerHTML = ''; $$('.chap-head').forEach((h) => h.classList.remove('in'));
+  $('#ch-made').hidden = $('#ch-costs').hidden = result.kind === 'refused';
+  setView(pending === 'whole' || pending === 'exploded' ? pending : wholeUrl(result) ? 'whole' : 'exploded', { scroll: false });
+  startStory();
+  if (pending && SECTION_OF[pending]) setTimeout(() => setView(pending), 80);
+  else $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   loadPhotos(result.wikipedia_title || q);
   load3D(result.search_terms || q, result.m3d);
 }
@@ -490,7 +494,9 @@ function renderPicture() {
     return;
   }
   const img = document.createElement('img'); img.src = url; img.decoding = 'async';
-  if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => setView(pictureMode === 'whole' ? 'exploded' : 'whole')); }
+  if (picture.dataset.mode && picture.dataset.mode !== pictureMode) { picture.classList.remove('flip'); void picture.offsetWidth; picture.classList.add('flip'); }
+  picture.dataset.mode = pictureMode;
+  if (wholeUrl(result)) { img.style.cursor = 'pointer'; img.title = pictureMode === 'whole' ? 'Tap to pull it apart' : 'Tap to put it back together'; img.addEventListener('click', () => { story.userPic = true; setView(pictureMode === 'whole' ? 'exploded' : 'whole', { scroll: false }); }); }
   img.alt = `${result.title}: ${pictureMode === 'whole' ? 'assembled, with numbered parts' : 'exploded view with numbered parts'}`;
   img.addEventListener('error', () => { picture.innerHTML = '<p class="empty">The picture could not be loaded. Try “Draw it again”.</p>'; });
   picture.appendChild(img);
@@ -555,23 +561,76 @@ function loadArabicFont() {
   l.href = 'https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap';
   document.head.appendChild(l);
 }
-function setView(view) {
+// ---------- the answer as one story: how it works → how it's made → what it costs ----------
+// setView keeps its old names: the picture's two looks, and a part of the story to scroll to.
+const SECTION_OF = { photos: '#view-photos', model3d: '#view-model3d', factory: '#ch-made', money: '#ch-costs' };
+function setView(view, { scroll = true } = {}) {
   countTab(view);
-  $$('.tab').forEach((t) => { const on = t.dataset.view === view; t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
-  const pic = view === 'exploded' || view === 'whole';
-  if (pic) { pictureMode = view; renderPicture(); }
-  $('#view-picture').hidden = !pic;
-  $('#view-photos').hidden = view !== 'photos';
-  $('#view-model3d').hidden = view !== 'model3d';
-  $('#view-factory').hidden = view !== 'factory';
-  $('#view-money').hidden = view !== 'money';
-  if (view === 'factory' || view === 'money') {
-    const box = $(view === 'factory' ? '#factory' : '#money');
-    if (typeof renderMoney !== 'function') box.innerHTML = '<p class="empty">…</p>';
-    loadFeatures().then(() => { if ($('.tab.active')?.dataset.view === view) (view === 'factory' ? renderFactory : renderMoney)(); })
-      .catch((e) => { box.innerHTML = `<p class="empty">${escapeHTML(e.message)}</p>`; });
+  if (view === 'exploded' || view === 'whole') {
+    pictureMode = view === 'whole' && !wholeUrl(state.result || {}) ? 'exploded' : view;
+    $$('.ptab').forEach((t) => { const on = t.dataset.view === pictureMode; t.classList.toggle('active', on); t.setAttribute('aria-pressed', on); });
+    renderPicture();
   }
+  const drawing = view === 'factory' || view === 'money' ? renderChapter(view) : null;
+  if (!scroll || !SECTION_OF[view]) return;
+  const go = () => requestAnimationFrame(() => $(SECTION_OF[view]).scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  // jumping to costs: draw the factory chapter above it first, so the page does not grow under the jump
+  if (drawing) Promise.all([drawing, view === 'money' && !story.drawn.has('factory') ? renderChapter('factory') : null]).then(go); else go();
 }
+// Draw the factory or money chapter (loading its code the first time).
+function renderChapter(view) {
+  story.drawn.add(view);
+  const box = $(view === 'factory' ? '#factory' : '#money');
+  if (typeof renderMoney !== 'function') box.innerHTML = '<p class="empty">…</p>';
+  return loadFeatures().then(() => (view === 'factory' ? renderFactory : renderMoney)())
+    .catch((e) => { box.innerHTML = `<p class="empty">${escapeHTML(e.message)}</p>`; });
+}
+const story = { drawn: new Set(), userPic: false, observers: [] };
+// Watches the reader's scroll: draws chapters just before they arrive, lights the chapter bar,
+// takes the picture apart as the parts come up, and pulses each part's number as its card passes.
+function startStory() {
+  story.observers.forEach((o) => o.disconnect()); story.observers = [];
+  story.drawn = new Set(); story.userPic = false;
+  if (!('IntersectionObserver' in window)) { $$('.chap-head').forEach((h) => h.classList.add('in')); renderChapter('factory'); renderChapter('money'); return; }
+  const watch = (els, opts, fn) => { const o = new IntersectionObserver((es) => es.forEach(fn), opts); els.forEach((el) => el && o.observe(el)); story.observers.push(o); };
+  watch([$('#ch-made'), $('#ch-costs')], { rootMargin: '700px 0px' }, (e) => {
+    const v = e.target.id === 'ch-made' ? 'factory' : 'money';
+    if (e.isIntersecting && !story.drawn.has(v) && state.result?.kind !== 'refused') renderChapter(v);
+  });
+  watch($$('.chap-head'), { rootMargin: '0px 0px -15% 0px' }, (e) => { if (e.isIntersecting) e.target.classList.add('in'); });
+  // whole at the top, pulled apart once the parts come up (until the reader picks one)
+  watch([$('#parts')], { rootMargin: '-35% 0px -40% 0px' }, (e) => {
+    if (story.userPic || !wholeUrl(state.result || {})) return;
+    if (e.isIntersecting && pictureMode === 'whole') setView('exploded', { scroll: false });
+  });
+  watch([$('.result-head')], { threshold: 0.6 }, (e) => {
+    if (!story.userPic && e.isIntersecting && wholeUrl(state.result || {}) && pictureMode !== 'whole') setView('whole', { scroll: false });
+  });
+  if (window.innerWidth >= 900) watch($$('#parts li'), { rootMargin: '-45% 0px -45% 0px' }, (e) => { if (e.isIntersecting) glowPart([...e.target.parentNode.children].indexOf(e.target) + 1); });
+  onStoryScroll();
+}
+// A part's number pulses on the picture, without moving the page.
+function glowPart(n) {
+  const name = state.result?.parts?.[n - 1]?.name || '';
+  $$('#parts li').forEach((li, i) => li.classList.toggle('lit', i === n - 1));
+  $$('#picture .hot').forEach((h) => h.classList.toggle('pulse', h.dataset.name === name));
+}
+let storyTick = false;
+function onStoryScroll() {
+  if (storyTick) return; storyTick = true;
+  requestAnimationFrame(() => {
+    storyTick = false;
+    const r = $('#result'); if (!r || r.hidden) return;
+    const box = r.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, -box.top / Math.max(1, box.height - innerHeight)));
+    $('#chap-fill').style.width = `${Math.round(frac * 100)}%`;
+    let cur = 'works';
+    for (const sec of $$('.chapter')) if (sec.getBoundingClientRect().top < innerHeight * 0.35) cur = sec.dataset.chap;
+    $$('.chap').forEach((b) => { const on = b.dataset.chap === cur; if (on && !b.classList.contains('active')) countTab(cur === 'made' ? 'factory' : cur === 'costs' ? 'money' : 'exploded'); b.classList.toggle('active', on); b.setAttribute('aria-current', on ? 'step' : 'false'); });
+  });
+}
+addEventListener('scroll', onStoryScroll, { passive: true });
+addEventListener('resize', onStoryScroll, { passive: true });
 
 // ---------- photos of the real thing (Wikipedia) ----------
 const BAD_IMAGE = /icon|logo|commons-|wiki|edit-|question_book|symbol|flag_of|ambox|disambig|padlock|speaker|sound-|nuvola|crystal_clear|\.ogv|\.webm|\.ogg/i;
@@ -617,6 +676,14 @@ async function wikiDirect(title) {
 }
 
 // ---------- 3D models (Sketchfab) ----------
+// The 3D viewer is heavy: it starts loading only when the reader scrolls near it.
+function lazyFrame(iframe, src) {
+  if (iframe.dataset.live || !('IntersectionObserver' in window)) { iframe.src = src; return; }
+  iframe.dataset.src = src;
+  if (iframe._watch) return;
+  iframe._watch = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { iframe.dataset.live = '1'; iframe.src = iframe.dataset.src; iframe._watch.disconnect(); } }, { rootMargin: '400px 0px' });
+  iframe._watch.observe(iframe);
+}
 async function load3D(terms, known) {
   const box = $('#model3d'); box.innerHTML = '<p class="empty">Looking for a 3D model…</p>';
   state.model3d = known || null;
@@ -641,7 +708,7 @@ async function load3D(terms, known) {
     const iframe = $('iframe', box); const thumbs = $('.thumbs', box);
     const pick = (m, btn) => {
       state.model3d = { uid: m.uid, name: m.name, by: m.user?.displayName ?? m.by ?? '', url: skUrl(m.viewerUrl || m.url, m.uid), thumb: thumbOf(m) };
-      iframe.src = `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
+      lazyFrame(iframe, `https://sketchfab.com/models/${m.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`);
       $$('button', thumbs).forEach((b) => b.classList.toggle('active', b === btn));
       $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(state.model3d.by || 'a Sketchfab artist')} on Sketchfab, under its own licence. Drag to spin, pinch or scroll to zoom.`;
       const a = $('#model3d-credit a'); a.href = state.model3d.url; a.textContent = m.name;
@@ -658,7 +725,7 @@ async function load3D(terms, known) {
   } catch {
     if (known?.uid) {
       box.innerHTML = '<div class="viewer"><iframe title="3D model" allow="autoplay; fullscreen; xr-spatial-tracking" allowfullscreen></iframe></div>';
-      $('iframe', box).src = `https://sketchfab.com/models/${known.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`;
+      lazyFrame($('iframe', box), `https://sketchfab.com/models/${known.uid}/embed?autostart=0&ui_infos=1&ui_watermark=0&dnt=1`);
       $('#model3d-credit').innerHTML = `<a target="_blank" rel="noopener"></a> by ${escapeHTML(known.by || 'a Sketchfab artist')} on Sketchfab, under its own licence.`;
       const a = $('#model3d-credit a'); a.href = skUrl(known.url, known.uid); a.textContent = known.name || '3D model';
       return;
@@ -920,7 +987,8 @@ $('#key-form').addEventListener('submit', () => {
 $('#cancel').addEventListener('click', () => state.abort?.abort());
 $('#error-close').addEventListener('click', () => { $('#error').hidden = true; });
 $('#quality').addEventListener('change', updateEstimate);
-$$('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.view)));
+$$('.ptab').forEach((t) => t.addEventListener('click', () => { story.userPic = true; setView(t.dataset.view); }));
+$$('.chap').forEach((b) => b.addEventListener('click', () => { const c = b.dataset.chap; if (c === 'works') $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' }); else setView(c === 'made' ? 'factory' : 'money'); }));
 $('#redraw').addEventListener('click', () => ask(state.query, { force: true, reusePlan: state.result?.image_prompt ? { ...state.result, image: null, image_whole: null, image_id: null, has_whole: false, badges: {}, image_factory: null, has_factory_img: false, state_imgs: undefined, state_keys: undefined } : null }));
 $('#remake').addEventListener('click', () => ask(state.query, { force: true }));
 $('#share').addEventListener('click', openShare);

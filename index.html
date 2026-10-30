@@ -80,7 +80,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=35">
+  <link rel="stylesheet" href="style.css?v=36">
 </head>
 <body>
 
@@ -226,41 +226,56 @@
       <p class="hook" id="r-hook"></p>
     </header>
 
-    <nav class="tabs" role="tablist" aria-label="Views">
-      <button role="tab" class="tab active" data-view="exploded" aria-selected="true" data-i18n="tab_exploded">⊕ Pulled apart</button>
-      <button role="tab" class="tab" data-view="whole" aria-selected="false" id="tab-whole" data-i18n="tab_whole">◉ Whole</button>
-      <button role="tab" class="tab" data-view="photos" aria-selected="false" data-i18n="tab_photos">📷 Real thing</button>
-      <button role="tab" class="tab" data-view="model3d" aria-selected="false" data-i18n="tab_3d">🧊 3D</button>
-      <button role="tab" class="tab" data-view="factory" aria-selected="false" id="tab-factory">🏭 Factory</button>
-      <button role="tab" class="tab" data-view="money" aria-selected="false" id="tab-money" data-i18n="tab_money">💰 Money</button>
+    <nav class="chapters" id="chapters" aria-label="Chapters">
+      <button type="button" class="chap active" data-chap="works"><span class="chap-ic">⚙️</span><span class="chap-t" data-i18n="ch_works">How it works</span></button>
+      <button type="button" class="chap" data-chap="made" id="tab-factory"><span class="chap-ic">🏭</span><span class="chap-t" data-i18n="ch_made">How it's made</span><span class="chap-pct"></span></button>
+      <button type="button" class="chap" data-chap="costs" id="tab-money"><span class="chap-ic">💰</span><span class="chap-t" data-i18n="ch_costs">What it costs</span></button>
+      <span class="chap-bar" aria-hidden="true"><i id="chap-fill"></i></span>
     </nav>
 
-    <div class="view" id="view-picture">
-      <div class="stage"><div class="picture" id="picture"></div></div>
-      <h3 class="list-h" data-i18n="parts">Parts</h3>
-      <ol class="parts" id="parts"></ol>
-      <h3 class="list-h" data-i18n="steps">Step by step</h3>
-      <ol class="steps" id="steps"></ol>
-      <p class="fact" id="fact" data-label="Did you know?"></p>
-    </div>
+    <!-- Chapter 1: how it works. On wide screens the picture stays put while the parts and steps scroll past. -->
+    <section class="chapter" id="ch-works" data-chap="works">
+      <div class="works-grid">
+        <div class="works-pic">
+          <div class="stage">
+            <div class="picture" id="picture"></div>
+            <div class="pic-toggle" role="group" aria-label="Picture">
+              <button type="button" class="ptab" data-view="whole" id="tab-whole" data-i18n="tab_whole">◉ Whole</button>
+              <button type="button" class="ptab active" data-view="exploded" data-i18n="tab_exploded">⊕ Pulled apart</button>
+            </div>
+          </div>
+        </div>
+        <div class="works-text" id="view-picture">
+          <h3 class="list-h" data-i18n="parts">Parts</h3>
+          <ol class="parts" id="parts"></ol>
+          <h3 class="list-h" data-i18n="steps">Step by step</h3>
+          <ol class="steps" id="steps"></ol>
+          <p class="fact" id="fact" data-label="Did you know?"></p>
+        </div>
+      </div>
+      <div class="view" id="view-photos">
+        <h3 class="list-h" data-i18n="tab_photos">📷 Real thing</h3>
+        <div class="gallery" id="gallery"></div>
+        <p class="credit" id="gallery-credit"></p>
+      </div>
+      <div class="view" id="view-model3d">
+        <h3 class="list-h" data-i18n="tab_3d">🧊 3D</h3>
+        <div class="model3d" id="model3d"></div>
+        <p class="credit" id="model3d-credit"></p>
+      </div>
+    </section>
 
-    <div class="view" id="view-photos" hidden>
-      <div class="gallery" id="gallery"></div>
-      <p class="credit" id="gallery-credit"></p>
-    </div>
+    <!-- Chapter 2: how it's made. Its code and content load just before it scrolls into view. -->
+    <section class="chapter" id="ch-made" data-chap="made">
+      <header class="chap-head"><span class="chap-big" aria-hidden="true">🏭</span><h2 data-i18n="ch_made">How it's made</h2><p data-i18n="ch_made_lead">From raw material to the truck: the factory that would make it, three ways.</p></header>
+      <div class="view" id="view-factory"><div class="factory" id="factory"></div></div>
+    </section>
 
-    <div class="view" id="view-model3d" hidden>
-      <div class="model3d" id="model3d"></div>
-      <p class="credit" id="model3d-credit"></p>
-    </div>
-
-    <div class="view" id="view-factory" hidden>
-      <div class="factory" id="factory"></div>
-    </div>
-
-    <div class="view" id="view-money" hidden>
-      <div class="factory money" id="money"></div>
-    </div>
+    <!-- Chapter 3: what it costs. -->
+    <section class="chapter" id="ch-costs" data-chap="costs">
+      <header class="chap-head"><span class="chap-big" aria-hidden="true">💰</span><h2 data-i18n="ch_costs">What it costs</h2><p data-i18n="ch_costs_lead">What it takes to set that factory up and run it, and when it pays back.</p></header>
+      <div class="view" id="view-money"><div class="factory money" id="money"></div></div>
+    </section>
 
     <footer class="result-foot">
       <span id="cost"></span>
@@ -330,8 +345,8 @@
 </dialog>
 
 <script src="demo.js?v=24"></script>
-<script src="i18n.js?v=2"></script>
-<script src="app.js?v=38"></script>
+<script src="i18n.js?v=3"></script>
+<script src="app.js?v=39"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {

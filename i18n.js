@@ -64,6 +64,7 @@ I18N.en = {
   rangeNote: 'Ranges: equipment ±25%, other running costs ±20%, salaries and materials ±15%, power ±10%, unless you typed the number.',
   sellAt: 'Sell at', aboveMarket: 'above the usual market price', profit: 'Profit', aMonth: 'a month', paysBackIn: 'Pays back in',
   needMarkup: 'To pay back in {y} years you need about <b>{p}%</b> markup.',
+  ch_works: "How it works", ch_made: "How it's made", ch_costs: "What it costs", ch_made_lead: "From raw material to the truck: the factory that would make it, three ways.", ch_costs_lead: "What it takes to set that factory up and run it, and when it pays back.",
 };
 
 // Each other language lives in i18n/<code>.js (same keys, same {placeholders}) and is loaded only
@@ -72,7 +73,7 @@ const langLoads = {};
 function loadLang(code, then) {
   if (code === 'en' || I18N[code]) return;
   if (!langLoads[code]) {
-    langLoads[code] = new Promise((ok) => { const el = document.createElement('script'); el.src = `i18n/${code}.js?v=1`; el.onload = ok; el.onerror = ok; document.head.appendChild(el); });
+    langLoads[code] = new Promise((ok) => { const el = document.createElement('script'); el.src = `i18n/${code}.js?v=2`; el.onload = ok; el.onerror = ok; document.head.appendChild(el); });
   }
   langLoads[code].then(() => { if (I18N[code]) then?.(); });
 }

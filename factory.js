@@ -602,7 +602,7 @@ function endProgress(r) {
   r.progress.tasks.forEach((t) => { if (t.status === 'run' || t.status === 'wait') t.status = 'fail'; });
   drawProgress(r);
   setTimeout(() => { if (r.progress?.end) { r.progress = null; if (state.result === r) $('#fprog')?.remove(); } }, 6000);
-  const tab = $('#tab-factory'); if (tab && state.result === r) { tab.classList.remove('prog'); tab.textContent = '🏭 Factory'; }
+  const tab = $('#tab-factory'); if (tab && state.result === r) { tab.classList.remove('prog'); $('.chap-pct', tab).textContent = ''; }
 }
 // Seconds left on one task; the floor and the before/after pictures run side by side, after the plan.
 function taskLeft(t, r) {
@@ -631,7 +631,7 @@ function drawProgress(r) {
   const pct = `${Math.round(frac * 100)}%`;
   // the Factory tab and the button that started it fill up too
   const tab = $('#tab-factory');
-  if (tab) { tab.classList.toggle('prog', !p.end); tab.style.setProperty('--prog', pct); tab.textContent = p.end ? tx('tab_factory') : `${tx('tab_factory')} ${pct}`; }
+  if (tab) { tab.classList.toggle('prog', !p.end); tab.style.setProperty('--prog', pct); $('.chap-pct', tab).textContent = p.end ? '' : pct; }
   $$('[data-prog]').forEach((b) => { b.style.setProperty('--prog', pct); b.querySelector('.bp-text').textContent = p.end ? tx('done') : `${b.dataset.prog} ${tx('pctLeft', { p: pct, t: fmtSecs(left) })}`; });
   const el = $('#fprog'); if (!el) return;
   el.classList.toggle('finished', !!p.end);
