@@ -78,6 +78,12 @@ export async function fillGaps(page) {
 async function repair(ctx, site, ids) {
   for (const id of ids) {
     const page = await ctx.newPage();
+    // show what the link service says to each save, so a refused save is not silent
+    page.on('response', async (res) => {
+      if (res.request().method() !== 'POST' || !res.url().startsWith('https://how-links')) return;
+      console.log(`  save → ${res.status()} ${(await res.text().catch(() => '')).slice(0, 300)}`);
+    });
+    page.on('requestfailed', (rq) => { if (rq.url().startsWith('https://how-links')) console.log(`  save failed: ${rq.failure()?.errorText} (${(rq.postData() || '').length} bytes)`); });
     try {
       await page.goto(`${site}#page/s=${id}`); await page.waitForFunction(() => state.result && state.shortId, null, { timeout: 60000 });
       await page.evaluate(() => loadFeatures());
@@ -88,7 +94,7 @@ async function repair(ctx, site, ids) {
           await fetch(`${LINKS_API}/gallery/${old}`, { method: 'DELETE', headers: { 'X-Admin': state.admin } });
           await galleryAdd();
         }
-        return { now: state.shortId, inGallery };
+        return { now: state.shortId, inGallery: inGallery && state.shortId !== old };
       }, id);
       console.log(`  now ${site}#s=${r.now}${r.inGallery ? ' (replaced in the gallery)' : ''}`);
     } catch (e) { console.log(`  failed: ${e.message.split('\n')[0]}`); }
