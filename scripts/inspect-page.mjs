@@ -32,3 +32,9 @@ for (const [m, v] of Object.entries(versions)) {
     console.log(`  ${i + 1}. ${f.zones[i].name}: ${out.join(' | ')}`);
   }
 }
+
+// Can the link service still store anything? A tiny save tells a full store (Cloudflare's daily
+// write allowance used up) apart from a problem with this page's own save.
+const probe = await fetch(`${API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://how.sala.company' }, body: JSON.stringify({ title: 'save test' }) }).catch((e) => ({ status: e.message, text: async () => '' }));
+const said = await probe.text();
+console.log(`\nSave test: ${probe.status} ${(/<title>([^<]*)/.exec(said)?.[1] || said).slice(0, 200)}`);
