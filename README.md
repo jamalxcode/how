@@ -6,7 +6,7 @@
 
 <br clear="left">
 
-Type a thing — *a combustion engine*, *scissors*, *a kettle*, *how a house is built* — and get three answers: **how it works** (one big exploded view with numbered parts, a few short steps, the real thing in photos and in 3D, in the spirit of the old "Tell Me Why" picture books), **how it is made** (the factory, in three versions: hand-made, mixed and automated) and **what it costs** (to set up and to run, and how long each version takes to pay back). In your language, almost no reading.
+Type a thing — *a combustion engine*, *scissors*, *a kettle*, *how a house is built* — and get three answers: **how it works** (one big exploded view with numbered parts, a few short steps, the real thing in photos and in 3D, in the spirit of the old "Tell Me Why" picture books), **how it is made** (the factory, in three versions: hand-made, mixed and automated) and **what it costs** (to set up and to run, and how long each version takes to pay back). In your language.
 
 It's a static site on GitHub Pages. Visitors sign in with their own OpenRouter account, which pays for both the words (Claude) and the picture (OpenAI's image model, also served through OpenRouter). The pages they make are stored by a tiny link service so they can be shared and reopened free.
 
