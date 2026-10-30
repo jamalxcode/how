@@ -160,7 +160,7 @@ async function makeMoney(region) {
   } catch (e) { r.money_error = e.message; }
   clearInterval(timer);
   r.money_busy = false;
-  if (state.result === r) renderMoney();
+  if (state.result === r) { renderMoney(); if (typeof renderAtlas === 'function') renderAtlas(); }
   if (r.financials) await saveFactory(r);
 }
 function drawMoneyProgress(r) {
@@ -179,7 +179,8 @@ function renderMoney() {
   if (r.financials && !r.financials._clean) { r.financials = cleanMoney(r.financials); Object.defineProperty(r.financials, '_clean', { value: true }); }
   const esc = escapeHTML; const fin = r.financials;
   const region = fin?.region || moneyRegion();
-  const regionPicker = `<label class="opt mregion"><span>${tx('where')}</span><select id="money-region">${REGIONS.map((x) => `<option${x === moneyRegion() ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
+  const places = REGIONS.includes(moneyRegion()) ? REGIONS : [moneyRegion(), ...REGIONS]; // a country picked on the map joins the list
+  const regionPicker = `<label class="opt mregion"><span>${tx('where')}</span><select id="money-region">${places.map((x) => `<option${x === moneyRegion() ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
   if (r.money_busy) {
     box.innerHTML = `<div class="fintro"><h3>${tx('workingMoney')}</h3><p>${tx('workingMoneyText', { region: esc(moneyRegion()) })}</p>
       <p class="fpaint"><button type="button" class="btn btn-prog" data-money-prog disabled><span class="bp-text">${tx('estimating')}</span></button></p></div>`;
@@ -302,6 +303,7 @@ function drawMoney(r) {
     drawMoney(r); saveEditsSoon(r);
   }));
   drawPayback(r);
+  if (typeof reshadeAtlas === 'function') reshadeAtlas();
 }
 
 // Markup → selling price, profit a month, and how long until the set-up is paid back (as a range).

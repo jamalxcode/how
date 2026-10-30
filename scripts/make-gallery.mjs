@@ -29,6 +29,8 @@ export async function makeOne(page, item, { region, log = console.log } = {}) {
   }
   const m = await page.evaluate(async (reg) => { setView('money'); await makeMoney(reg); return { error: state.result.money_error || '', ok: !!state.result.financials }; }, region);
   log(`  money: ${m.ok ? 'ok' : 'failed'}${m.error ? ` (${m.error})` : ''}`);
+  const a = await page.evaluate(async () => { await makeAtlas(); return { error: state.result.atlas_error || '', ok: !!state.result.atlas }; });
+  log(`  map: ${a.ok ? 'ok' : 'failed'}${a.error ? ` (${a.error})` : ''}`);
   const g = await page.evaluate(async () => { await galleryAdd(); return { text: $('#gallery-add').textContent, id: state.shortId, cost: state.cost }; });
   Object.assign(out, { ok: /In the gallery/.test(g.text), id: g.id, cost: g.cost, gallery: g.text, minutes: Math.round((Date.now() - t0) / 6e4) });
   return out;

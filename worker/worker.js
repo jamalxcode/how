@@ -45,6 +45,7 @@ function cleanAnswer(d) {
     // where the painted factory floor's zone numbers are, in % of the picture
     floor_badges: cleanBadges(d.floor_badges),
     financials: cleanFinancials(d.financials),
+    atlas: cleanAtlas(d.atlas),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
@@ -84,6 +85,17 @@ function cleanFactory(f, nParts) {
 }
 const STATE_KEY = /^z\d{1,2}[ab]$/;
 const MODES = ['manual', 'mixed', 'auto'];
+// The map's inputs (see atlas.js, which trims them the same way and does the sums).
+function cleanAtlas(a) {
+  if (!a || typeof a !== 'object') return undefined;
+  const ISO = /^[A-Z]{2}$/; const s = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const n = (v, hi) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(0, x)) : 0; };
+  const list = (v, max, fn) => (Array.isArray(v) ? v.slice(0, max).filter((x) => x && typeof x === 'object').map(fn).filter(Boolean) : []);
+  return {
+    materials: list(a.materials, 10, (m) => ({ name: s(m.name, 80), origins: list(m.origins, 3, (o) => (ISO.test(o.iso2 || '') ? { iso2: o.iso2, share: Math.round(n(o.share, 100)) } : null)) })),
+    countries: list(a.countries, 40, (c) => (ISO.test(c.iso2 || '') ? { iso2: c.iso2, worker_wage: n(c.worker_wage, 50000), power_price: n(c.power_price, 5), rent: n(c.rent, 500), note: s(c.note, 120) } : null)),
+  };
+}
 // The Money tab's inputs (see money.js, which trims them the same way and does all the sums).
 function cleanFinancials(m) {
   if (!m || typeof m !== 'object') return undefined;
@@ -360,7 +372,7 @@ export default {
         for (const [sk, b] of Object.entries(variants[m].pics)) await env.LINKS.put(`imgs:${k}:${m}:${sk}`, b);
       }
       // "factory", "states" and "variants" tell the page what this service kept (an older one drops them silently)
-      return json({ id: k, factory: !!data.factory, financials: !!data.financials, states: stateKeys.length,
+      return json({ id: k, factory: !!data.factory, financials: !!data.financials, atlas: !!data.atlas, states: stateKeys.length,
         variants: Object.fromEntries(vNames.map((m) => [m, { floor: !!variants[m].floor, states: Object.keys(variants[m].pics).length }])) }, 200, h);
     }
 

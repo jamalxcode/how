@@ -21,6 +21,8 @@ It's a static site on GitHub Pages. Visitors sign in with their own OpenRouter a
 
 6. **💰 Money.** Approximate financials for the three setups side by side, for a region you pick: land and building, people and monthly salaries, equipment, power, other running costs and materials (Claude estimates the inputs, ~2¢; the page does every sum). Every input can be changed — a few overall controls (output, salaries, power price, materials, equipment and running costs) and every line in the detail — and the page recalculates at once; numbers you type are exact, the AI's are shown as ranges. A markup slider shows the selling price, monthly profit and how long each setup takes to pay back, against the typical market price, and the markup needed to pay back in three years.
 
+7. **🌍 Where it comes from, and where to make it**, at the top of the What it costs chapter: a world map with arrows from where each raw material usually comes from to the factory, and every likely country shaded by what it would cost to make one there (hand-made, mixed or automated). Claude estimates the sources and each country's factory wage, power price and rent once (~2¢); the page scales the money estimate, including your own numbers, by them. Tap a country for its figures and a one-click full money estimate there, which moves the factory.
+
 Right-to-left languages (Arabic, Urdu, Persian) flip the layout and switch to Noto Naskh Arabic. The home page shows a page from the gallery under the headline and a **Browse answers** grid, free to open.
 
 ## How it works
@@ -55,6 +57,7 @@ Question + language + audience
 | `app.js` | sign-in and keys, the prompt and schema, painting, storing, sharing, gallery, Wikipedia and Sketchfab |
 | `i18n.js`, `i18n/*.js` | the page's own labels: English in `i18n.js`, each other language in its own file, loaded only when a page in it opens; `tx('key')` picks the page's language |
 | `scripts/make-gallery.mjs`, `.github/workflows/gallery.yml` | makes complete gallery pages (page, three factory versions, money) on the live site; run from the Actions tab |
+| `atlas.js`, `world.json` | the map: its prompt, the per-country sums and the drawing; country outlines from Natural Earth via world-atlas, projected and keyed by country code (85 KB, loaded with the chapter) |
 | `money.js` | the What it costs chapter: the estimate's prompt and schema, the sums, cards, payback and cost bars |
 | `factory.js` | the How it's made chapter: the plan's prompt and schema, the line diagram, the to-scale floor plan, the factory part of the report |
 | `demo.js`, `demo-scissors.jpg` | the built-in demo page, with its factory |

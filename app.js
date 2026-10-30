@@ -333,7 +333,7 @@ let featuresLoading = null;
 function loadFeatures() {
   if (typeof renderMoney === 'function') return Promise.resolve();
   const add = (src) => new Promise((ok, no) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => no(new Error('Could not load this tab. Check your connection and try again.')); document.body.appendChild(el); });
-  return (featuresLoading = featuresLoading || add('factory.js?v=14').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
+  return (featuresLoading = featuresLoading || add('factory.js?v=15').then(() => add('money.js?v=4')).then(() => add('atlas.js?v=2')).catch((e) => { featuresLoading = null; throw e; }));
 }
 // A language's labels arrived after the page was drawn: put them in place.
 function relabel() {
@@ -444,7 +444,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   if (result.financials && typeof cleanMoney === 'function') result.financials = cleanMoney(result.financials);
   $('#tab-factory').classList.remove('prog'); $('#tab-factory .chap-pct').textContent = '';
   const demoOf = typeof DEMO !== 'undefined' && (result.lang || 'English') === 'English' && DEMO[(result.title || '').toLowerCase()];
-  if (demoOf && demoOf !== result) { if (!result.factory && demoOf.factory) result.factory = JSON.parse(JSON.stringify(demoOf.factory)); if (!result.financials && demoOf.financials) result.financials = JSON.parse(JSON.stringify(demoOf.financials)); }
+  if (demoOf && demoOf !== result) { for (const k of ['factory', 'financials', 'atlas']) if (!result[k] && demoOf[k]) result[k] = JSON.parse(JSON.stringify(demoOf[k])); }
   if (result.factory && typeof cleanFactory === 'function') result.factory = cleanFactory(result.factory, (result.parts || []).length);
   loadLang(langCode(result.lang), relabel);
   // other versions of the factory: their pictures are stored under their own name unless said otherwise
@@ -474,7 +474,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   });
 
   const pending = state.pendingView; state.pendingView = null;
-  $('#factory').innerHTML = ''; $('#money').innerHTML = ''; $$('.chap-head').forEach((h) => h.classList.remove('in'));
+  $('#factory').innerHTML = ''; $('#money').innerHTML = ''; $('#atlas').innerHTML = ''; $$('.chap-head').forEach((h) => h.classList.remove('in'));
   $('#ch-made').hidden = $('#ch-costs').hidden = result.kind === 'refused';
   setView(pending === 'whole' || pending === 'exploded' ? pending : wholeUrl(result) ? 'whole' : 'exploded', { scroll: false });
   startStory();
@@ -582,7 +582,7 @@ function renderChapter(view) {
   story.drawn.add(view);
   const box = $(view === 'factory' ? '#factory' : '#money');
   if (typeof renderMoney !== 'function') box.innerHTML = '<p class="empty">…</p>';
-  return loadFeatures().then(() => (view === 'factory' ? renderFactory : renderMoney)())
+  return loadFeatures().then(() => { if (view === 'factory') renderFactory(); else { renderAtlas(); renderMoney(); } })
     .catch((e) => { box.innerHTML = `<p class="empty">${escapeHTML(e.message)}</p>`; });
 }
 const story = { drawn: new Set(), userPic: false, observers: [] };
@@ -757,11 +757,11 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories, financials } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories, financials, atlas } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
   return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined, state_images: state_imgs && Object.keys(state_imgs).length ? state_imgs : undefined, state_keys: state_keys?.length ? state_keys : undefined, floor_badges: floor_badges?.length ? floor_badges : undefined,
-    financials: financials || undefined,
+    financials: financials || undefined, atlas: atlas || undefined,
     factory_mode: factory ? factory_mode || 'mixed' : undefined, factory_where: factory_where || undefined,
     factories: factories && Object.keys(factories).length ? Object.fromEntries(Object.entries(factories).map(([m, v]) => [m, { factory: v.factory, image_factory: v.image_factory || undefined, has_factory_img: v.has_factory_img || undefined, state_images: v.state_imgs && Object.keys(v.state_imgs).length ? v.state_imgs : undefined, state_keys: v.state_keys, floor_badges: v.floor_badges, where: v.factory_where ?? m }])) : undefined };
 }
