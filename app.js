@@ -420,7 +420,7 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
   const r = $('#result');
   r.hidden = false;
   document.body.classList.add('has-result');
-  document.title = `${result.title || q} · How does it work?`;
+  document.title = `${result.title || q} — how it works, how it's made, what it costs · How`;
   countAnswer(result.title || q, shared ? 'shared' : free ? 'reopened' : 'made');
   r.setAttribute('dir', RTL.test(result.lang || '') ? 'rtl' : 'ltr');
   r.setAttribute('lang', langCode(result.lang));

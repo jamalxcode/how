@@ -706,3 +706,6 @@ body.has-result .hero-sub { display: none; }
 .result[dir="rtl"] .mbig b, .result[dir="rtl"] .mbar-row > b, .result[dir="rtl"] .mpay-nums b, .result[dir="rtl"] .mmarket b,
 .result[dir="rtl"] .mtable .nw, .result[dir="rtl"] .mrange, .result[dir="rtl"] .ftile b { unicode-bidi: isolate; direction: ltr; }
 .result[dir="rtl"] .mbig b, .result[dir="rtl"] .ftile b { text-align: right; }
+.hero-more { display: block; font-size: .42em; font-weight: 700; font-style: italic; color: var(--teal); letter-spacing: 0; margin-top: 6px; }
+.about-list { margin: 0 0 10px; padding-left: 20px; text-align: left; }
+.about-list li { margin-bottom: 6px; }

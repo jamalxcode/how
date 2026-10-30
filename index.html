@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>How does it work? See anything pulled apart, with numbered parts | How</title>
+  <title>How does it work, how is it made, what does it cost? | How</title>
 
   <!-- SEO -->
-  <meta name="description" content="Type anything — a combustion engine, scissors, a can opener, how a house is built — and see how it works, how a factory would make it, and what that would cost: one exploded view with numbered parts, a few short steps, real photos and a 3D model, in 17 languages. Free to browse, in your browser.">
+  <meta name="description" content="Type anything — scissors, a kettle, an electric motor — and see how it works (pulled apart, with numbered parts), how a factory would make it (by hand, mixed or with robots, on a floor plan drawn to scale) and what that would cost to set up and run. In 17 languages; free to browse.">
   <meta name="author" content="Sala Company">
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="theme-color" content="#fbf4e4">
@@ -22,7 +22,7 @@
   <meta property="og:site_name" content="How · Sala Company">
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://how.sala.company/">
-  <meta property="og:title" content="How does it work? See anything pulled apart">
+  <meta property="og:title" content="How does it work, how is it made, and what does it cost?">
   <meta property="og:description" content="Type a thing. See it pulled apart and numbered, how a factory would make it, and what that would cost — in your language.">
   <meta property="og:image" content="https://how.sala.company/og-image.jpg">
   <meta property="og:image:width" content="1200">
@@ -31,7 +31,7 @@
 
   <!-- Twitter / X card -->
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="How does it work? See anything pulled apart">
+  <meta name="twitter:title" content="How does it work, how is it made, and what does it cost?">
   <meta name="twitter:description" content="Type a thing. See it pulled apart and numbered, how a factory would make it, and what that would cost — in your language.">
   <meta name="twitter:image" content="https://how.sala.company/og-image.jpg">
 
@@ -44,7 +44,7 @@
         "@type": "WebSite",
         "@id": "https://how.sala.company/#website",
         "name": "How",
-        "alternateName": "How does it work?",
+        "alternateName": "How does it work, how is it made, what does it cost?",
         "url": "https://how.sala.company/",
         "inLanguage": "en",
         "publisher": { "@id": "https://go.sala.company/#org" }
@@ -52,10 +52,10 @@
       {
         "@type": "WebApplication",
         "@id": "https://how.sala.company/#app",
-        "name": "How: see how anything works, pulled apart",
+        "name": "How: how anything works, how it is made, and what it costs",
         "url": "https://how.sala.company/",
         "image": "https://how.sala.company/og-image.jpg",
-        "description": "Type a thing — a combustion engine, scissors, a can opener, how a house is built — and get one exploded view with numbered parts, a few short steps, a fun fact, photos of the real thing and a 3D model to spin, in 17 languages including Arabic. Shared answers and the gallery open free with no sign-in; making a new page uses your own OpenRouter account for the AI.",
+        "description": "Type a thing and get three answers. How it works: one exploded view with numbered parts, a few short steps, a fun fact, photos of the real thing and a 3D model to spin. How it is made: a factory planned in the order things happen, in three versions (hand-made, mixed and automated), with every step marked machine or people, a floor plan drawn to scale and before-and-after pictures of every zone. What it costs: land, people and salaries, equipment, power and running costs for all three, and how long each takes to pay back. In 17 languages including Arabic; shared answers and the gallery open free with no sign-in, and making a new page uses your own OpenRouter account for the AI.",
         "applicationCategory": "EducationalApplication",
         "operatingSystem": "Any (web browser)",
         "browserRequirements": "Requires JavaScript",
@@ -80,7 +80,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;0,9..144,900;1,9..144,500&family=Nunito:ital,wght@0,400;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=34">
+  <link rel="stylesheet" href="style.css?v=35">
 </head>
 <body>
 
@@ -102,8 +102,8 @@
 
 <main>
   <section class="hero" id="hero">
-    <h1 class="hero-title">How does <span class="hero-it">it</span> work?</h1>
-    <p class="hero-sub">Type a thing. Get the picture — pulled apart and numbered, the real thing in photos and 3D. Almost no reading.</p>
+    <h1 class="hero-title">How does <span class="hero-it">it</span> work?<span class="hero-more">How is it made? What does it cost?</span></h1>
+    <p class="hero-sub">Type a thing. See it pulled apart and numbered, made in a factory three ways — by hand, mixed or with robots — and costed, from the land to the payback. Almost no reading.</p>
 
     <button type="button" id="hero-live" class="hero-live" hidden aria-label="Open this answer">
       <div class="hero-live-stage" id="hero-live-stage"></div>
@@ -277,11 +277,16 @@
 <footer class="foot">
   <details class="about" id="about">
     <summary>What is How?</summary>
-    <p>How is a picture book that draws itself. Ask how a thing works — a combustion engine, scissors, a can opener, a zipper, a refrigerator, bicycle gears, why planes fly, how a house is built — and you get one exploded view with the parts numbered, a few short steps, a fun fact, photos of the real thing from Wikipedia and a 3D model from Sketchfab to spin. It explains in 17 languages, including Arabic, Urdu and Persian laid out right to left, and for three audiences: a curious adult, a 10-year-old or an engineering student.</p>
-    <p>For anyone thinking of making it, two more tabs go further. <strong>Factory</strong> plans the plant in the order things happen — raw materials, parts made or bought, machines, assembly, quality checks, packing and shipping — with every step marked machine, people or both, a floor plan drawn to scale and before-and-after pictures of every zone, in three versions: hand-made, mixed and automated. <strong>Money</strong> puts approximate numbers on all three: land, people and salaries, equipment, power and running costs, and how long each takes to pay back at the markup you choose.</p>
-    <p>It is in the spirit of the old <em>Tell Me Why</em> books: almost no reading, one big picture. The words are written by Claude and the picture is painted by OpenAI's image model, both paid for through your own OpenRouter account (a few cents a page). Every answer in the gallery, and every answer someone shares with you, opens free with no sign-in. Made by <a href="https://go.sala.company">Sala Company</a> in Kuwait; the <a href="https://github.com/jamalxcode/how">source is open</a>.</p>
+    <p>How answers three questions about any thing — a combustion engine, scissors, a kettle, a zipper, a refrigerator, bicycle gears, how a house is built: <strong>how does it work, how is it made, and what does it cost?</strong></p>
+    <ul class="about-list">
+      <li><strong>How it works.</strong> One big exploded view with the parts numbered, a few short steps and a fun fact, plus photos of the real thing from Wikipedia and a 3D model from Sketchfab to spin.</li>
+      <li><strong>How it is made.</strong> The factory, in the order things happen: raw materials, parts made or bought, machines, assembly, quality checks, packing and shipping. Every step is marked machine, people or both, with a floor plan drawn to scale and before-and-after pictures of every zone, in three versions: hand-made, mixed and automated.</li>
+      <li><strong>What it costs.</strong> Approximate numbers for all three versions side by side: land, people and monthly salaries, equipment, power and running costs, and how long each takes to pay back at the markup you choose. Change any number to your own and it all recalculates.</li>
+    </ul>
+    <p>It explains in 17 languages, including Arabic, Urdu and Persian laid out right to left, for a curious adult, a 10-year-old or an engineering student. It began in the spirit of the old <em>Tell Me Why</em> books — almost no reading, one big picture — and grew into a first look at making the thing too.</p>
+    <p>The words and plans are written by Claude and the pictures are painted by OpenAI's image model, both paid for through your own OpenRouter account (a few cents a page; a factory plan or a cost estimate is a few cents more). Every answer in the gallery, and every answer someone shares with you, opens free with no sign-in. The factory plans and costs are rough estimates for learning and a first feel of the numbers, not engineering quotes. Made by <a href="https://go.sala.company">Sala Company</a> in Kuwait; the <a href="https://github.com/jamalxcode/how">source is open</a>.</p>
   </details>
-  <p>How is a free, static page: your OpenRouter account pays the AI; the pages you make are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
+  <p>How is a free, static page: your OpenRouter account pays the AI; the pages you make — with their factory plans and cost estimates — are kept so they can be shared. Photos from Wikipedia, 3D models from Sketchfab (each with its own licence).
     <button type="button" class="link" id="privacy">Privacy</button> · <a href="https://github.com/jamalxcode/how">Source</a> · <a href="https://go.sala.company">Sala Company</a></p>
 </footer>
 
@@ -290,8 +295,9 @@
 <dialog id="privacy-dialog" class="dialog">
   <h3>Privacy</h3>
   <table>
-    <tr><th>Your question &amp; language</th><td>Sent through OpenRouter to Claude (the words) and OpenAI's image model (the picture) when you press Show me. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
-    <tr><th>The page you get</th><td>Stored by this site's link service (so it can be shared and reopened free). It holds no name or account; only what you asked and the picture.</td></tr>
+    <tr><th>Your question &amp; language</th><td>Sent through OpenRouter to Claude (the words, factory plans and cost estimates) and OpenAI's image model (the pictures) when you press Show me, plan a factory or estimate the money. Also sent to Wikipedia and Sketchfab to find photos and 3D models.</td></tr>
+    <tr><th>The page you get</th><td>Stored by this site's link service (so it can be shared and reopened free). It holds no name or account; only what you asked, the pictures, and any factory plans and cost estimates.</td></tr>
+    <tr><th>Your own numbers</th><td>Numbers you change on the Money tab stay in your browser only.</td></tr>
     <tr><th>OpenRouter sign-in</th><td>Kept in your browser until you sign out. Never sent to this site.</td></tr>
     <tr><th>Analytics</th><td>Page views only (GoatCounter, no cookies).</td></tr>
   </table>
@@ -325,7 +331,7 @@
 
 <script src="demo.js?v=24"></script>
 <script src="i18n.js?v=2"></script>
-<script src="app.js?v=37"></script>
+<script src="app.js?v=38"></script>
 <!-- GoatCounter analytics (not loaded on localhost; paths are prefixed with the host so all *.sala.company apps share one dashboard) -->
 <script>
   (function () {
