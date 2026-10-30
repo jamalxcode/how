@@ -333,7 +333,7 @@ let featuresLoading = null;
 function loadFeatures() {
   if (typeof renderMoney === 'function') return Promise.resolve();
   const add = (src) => new Promise((ok, no) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => no(new Error('Could not load this tab. Check your connection and try again.')); document.body.appendChild(el); });
-  return (featuresLoading = featuresLoading || add('factory.js?v=13').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
+  return (featuresLoading = featuresLoading || add('factory.js?v=14').then(() => add('money.js?v=3')).catch((e) => { featuresLoading = null; throw e; }));
 }
 // A language's labels arrived after the page was drawn: put them in place.
 function relabel() {
