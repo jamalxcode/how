@@ -1,0 +1,21 @@
+# Prints what the link service holds for one page (factory versions, each zone's pictures and
+# whether they load). Actions → "Inspect a page" → Run workflow → paste the page's share link or id.
+name: Inspect a page
+on:
+  workflow_dispatch:
+    inputs:
+      page:
+        description: Page id or share link (for example 6bwrrrc)
+        required: true
+permissions: { contents: read }
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node scripts/inspect-page.mjs
+        env:
+          PAGE: ${{ inputs.page }}
