@@ -61,7 +61,7 @@ Question + language + audience
 | `money.js` | the What it costs chapter: the estimate's prompt and schema, the sums, cards, payback and cost bars |
 | `factory.js` | the How it's made chapter: the plan's prompt and schema, the line diagram, the to-scale floor plan, the factory part of the report |
 | `demo.js`, `demo-scissors.jpg` | the built-in demo page, with its factory |
-| `worker/worker.js` | the link service: stores pages and pictures, short links, gallery, flags, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
+| `worker/worker.js` | the link service: stores pages and pictures (each picture written once; pages point to them, so a save costs one write plus one per new picture — Cloudflare's free plan allows 1,000 writes a day), short links, gallery, flags, Wikipedia and Sketchfab lookups (Cloudflare Worker + KV) |
 | `logo.svg`, `favicon-48.png`, `apple-touch-icon.png` | gear-with-a-question-mark badge, also the favicon and home-screen icon |
 | `og-image.jpg`, `robots.txt`, `sitemap.xml` | link preview picture and search-engine files |
 

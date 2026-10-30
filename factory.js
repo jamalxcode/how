@@ -388,8 +388,9 @@ async function saveFactory(r) {
   try {
     const body = sharePayload({ ...r, image: r.image_id ? undefined : r.image, image_whole: r.image_id ? undefined : r.image_whole, q: state.result === r ? state.query : r.q });
     const res = await fetch(`${LINKS_API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const j = res.ok ? await res.json() : null;
-    if (j?.id && (j.factory || j.financials || j.atlas)) {
+    const j = await res.json().catch(() => null);
+    if (!res.ok && j?.error && state.result === r) showError(`Not saved: ${j.error}`);
+    if (res.ok && j?.id && (j.factory || j.financials || j.atlas)) {
       r.image_id = j.id; r.image = null; r.image_whole = null;
       if (r.image_factory) { r.has_factory_img = true; r.image_factory = null; }
       const keys = [...new Set([...(r.state_keys || []), ...Object.keys(r.state_imgs || {})])];

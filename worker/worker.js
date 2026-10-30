@@ -84,6 +84,7 @@ function cleanFactory(f, nParts) {
   };
 }
 const STATE_KEY = /^z\d{1,2}[ab]$/;
+class BadPicture extends Error {}
 const MODES = ['manual', 'mixed', 'auto'];
 // The map's inputs (see atlas.js, which trims them the same way and does the sums).
 function cleanAtlas(a) {
@@ -204,6 +205,17 @@ async function cached(req, h, fn) {
 
 export default {
   async fetch(req, env) {
+    try { return await handle(req, env); } catch (e) {
+      const msg = String(e?.message || e);
+      // Cloudflare's free plan allows 1,000 writes a day; past that every save fails until midnight UTC
+      const full = /limit/i.test(msg);
+      return json({ error: full ? 'the link store is full for today (Cloudflare daily write limit); try again after midnight UTC' : `link service error: ${msg.slice(0, 200)}` }, full ? 503 : 500, cors(req.headers.get('Origin') || ''));
+    }
+  },
+};
+
+async function handle(req, env) {
+  {
     const h = cors(req.headers.get('Origin') || '');
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
@@ -260,15 +272,18 @@ export default {
       return new Response((await env.LINKS.get('flags:list')) || '[]', { status: 200, headers: { 'Content-Type': 'application/json', ...h } });
     }
 
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}\/s\/((manual|mixed|auto)\/)?z\d{1,2}[ab]$/.test(path)) {
-      const bits = path.split('/'); const pid = bits[2]; const key = bits.pop(); const mode = bits.length === 5 ? bits[4] : '';
-      const img = await env.LINKS.get(`imgs:${pid}:${mode ? `${mode}:` : ''}${key}`, { type: 'arrayBuffer' });
-      if (!img) return json({ error: 'not found' }, 404, h);
-      return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
-    }
-    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole|\/factory(\/(manual|mixed|auto))?)?$/.test(path)) {
-      const [, , pid, which, mode] = path.split('/');
-      const img = await env.LINKS.get(`${which === 'whole' ? 'imgw' : which === 'factory' ? 'imgf' : 'img'}:${pid}${mode ? `:${mode}` : ''}`, { type: 'arrayBuffer' });
+    if (req.method === 'GET' && /^\/img\/[a-z0-9]{5,12}(\/whole|\/factory(\/(manual|mixed|auto))?|\/s\/((manual|mixed|auto)\/)?z\d{1,2}[ab])?$/.test(path)) {
+      const bits = path.split('/'); const pid = bits[2]; const which = bits[3] || 'main';
+      const sk = which === 's' ? bits[bits.length - 1] : ''; const mode = which === 's' ? (bits.length === 6 ? bits[4] : '') : bits[4] || '';
+      let page = null; try { page = JSON.parse((await env.LINKS.get(pid)) || 'null'); } catch {}
+      let name;
+      if (page?.pics) {
+        const p = mode ? page.pics.v?.[mode] : page.pics;
+        name = which === 'main' ? page.pics.main : which === 'whole' ? page.pics.whole : which === 'factory' ? p?.floor : p?.s?.[sk];
+      } else { // saved before "pics"
+        name = which === 's' ? `imgs:${pid}:${mode ? `${mode}:` : ''}${sk}` : `${which === 'whole' ? 'imgw' : which === 'factory' ? 'imgf' : 'img'}:${pid}${mode ? `:${mode}` : ''}`;
+      }
+      const img = name ? await env.LINKS.get(name, { type: 'arrayBuffer' }) : null;
       if (!img) return json({ error: 'not found' }, 404, h);
       return new Response(img, { status: 200, headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'public, max-age=31536000, immutable', ...h } });
     }
@@ -291,85 +306,99 @@ export default {
       let data;
       try { data = JSON.parse(text); } catch { return json({ error: 'not json' }, 400, h); }
       if (!data || typeof data.title !== 'string') return json({ error: 'not an answer' }, 400, h);
-      // the picture: either new bytes (data URL) or a reference to one already stored (image_id)
+      // Pictures are stored once and never copied: a page keeps, in "pics", the name of the stored
+      // entry holding each of its pictures. New pictures (data URLs) are written under a name made
+      // from their bytes; pictures of the page this one was saved from are taken over by name. So a
+      // save costs one write for the page plus one per new picture (Cloudflare's free plan allows
+      // 1,000 writes a day; copying every picture on every save used that up after a few pages).
       const decode = (v) => { const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(v || ''); return m ? Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)) : null; };
-      let imgBytes = decode(data.image), wholeBytes = decode(data.image_whole), factBytes = decode(data.image_factory);
-      if ([imgBytes, wholeBytes, factBytes].some((b) => b && !looksLikeImage(b))) return json({ error: 'not a picture' }, 400, h);
-      if (!imgBytes && data.image_id && /^[a-z0-9]{5,12}$/.test(data.image_id)) {
-        imgBytes = await env.LINKS.get(`img:${data.image_id}`, { type: 'arrayBuffer' });
-        if (!wholeBytes) wholeBytes = await env.LINKS.get(`imgw:${data.image_id}`, { type: 'arrayBuffer' });
-        if (!factBytes && data.has_factory_img) factBytes = await env.LINKS.get(`imgf:${data.image_id}${MODES.includes(data.factory_where) ? `:${data.factory_where}` : ''}`, { type: 'arrayBuffer' });
-      }
-      // before/after pictures of the factory zones: new ones as data URLs, stored ones by key
-      const stateBytes = {};
-      if (data.state_images && typeof data.state_images === 'object') {
-        for (const [sk, v] of Object.entries(data.state_images).slice(0, 24)) {
-          const b = STATE_KEY.test(sk) ? decode(v) : null;
-          if (b && !looksLikeImage(b)) return json({ error: 'not a picture' }, 400, h);
-          if (b) stateBytes[sk] = b;
+      const fresh = []; // [name, bytes] to write
+      const blob = async (v) => {
+        const b = decode(v); if (!b) return null;
+        if (!looksLikeImage(b)) throw new BadPicture();
+        const d = new Uint8Array(await crypto.subtle.digest('SHA-256', b));
+        const name = `b:${[...d.slice(0, 12)].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
+        if (!fresh.some(([n]) => n === name)) fresh.push([name, b]);
+        return name;
+      };
+      const oldId = /^[a-z0-9]{5,12}$/.test(data.image_id || '') ? data.image_id : null;
+      let old = null;
+      if (oldId) { try { old = JSON.parse((await env.LINKS.get(oldId)) || 'null'); } catch {} }
+      // where a picture of the old page lives; "where" is '' for the old page's shown version, else a mode
+      const exists = async (name) => { const r = await env.LINKS.get(name, { type: 'stream' }); if (!r) return false; await r.cancel(); return true; };
+      const oldRef = async (kind, where, sk) => {
+        if (!oldId || !old) return null;
+        const at = MODES.includes(where) ? where : '';
+        if (old.pics) {
+          const p = at ? old.pics.v?.[at] : old.pics;
+          const name = kind === 'main' ? old.pics.main : kind === 'whole' ? old.pics.whole : kind === 'floor' ? p?.floor : p?.s?.[sk];
+          return typeof name === 'string' ? name : null;
         }
-      }
-      if (/^[a-z0-9]{5,12}$/.test(data.image_id || '') && Array.isArray(data.state_keys)) {
-        for (const sk of data.state_keys.slice(0, 24)) {
-          if (typeof sk !== 'string' || !STATE_KEY.test(sk) || stateBytes[sk]) continue;
-          const b = await env.LINKS.get(`imgs:${data.image_id}:${MODES.includes(data.factory_where) ? `${data.factory_where}:` : ''}${sk}`, { type: 'arrayBuffer' });
-          if (b) stateBytes[sk] = b;
+        // a page saved before "pics": its pictures sit under names made from its id
+        const name = kind === 'main' ? `img:${oldId}` : kind === 'whole' ? `imgw:${oldId}` : kind === 'floor' ? `imgf:${oldId}${at ? `:${at}` : ''}` : `imgs:${oldId}${at ? `:${at}` : ''}:${sk}`;
+        return (await exists(name)) ? name : null;
+      };
+      let main, whole, floor; const states = {};
+      try {
+        main = (await blob(data.image)) || (await oldRef('main'));
+        whole = (await blob(data.image_whole)) || (await oldRef('whole'));
+        floor = (await blob(data.image_factory)) || (data.has_factory_img ? await oldRef('floor', data.factory_where) : null);
+        if (data.state_images && typeof data.state_images === 'object') {
+          for (const [sk, v] of Object.entries(data.state_images).slice(0, 24)) if (STATE_KEY.test(sk)) { const n = await blob(v); if (n) states[sk] = n; }
         }
-      }
+        if (Array.isArray(data.state_keys)) {
+          for (const sk of data.state_keys.slice(0, 24)) {
+            if (typeof sk !== 'string' || !STATE_KEY.test(sk) || states[sk]) continue;
+            const n = await oldRef('state', data.factory_where, sk); if (n) states[sk] = n;
+          }
+        }
+      } catch (e) { if (e instanceof BadPicture) return json({ error: 'not a picture' }, 400, h); throw e; }
       // the other versions of the factory (hand-made / mixed / automated), each with its own pictures
       const mode = MODES.includes(data.factory_mode) ? data.factory_mode : 'mixed';
       const variants = {}; const nParts = Array.isArray(data.parts) ? Math.min(data.parts.length, 20) : 0;
-      const oldId = /^[a-z0-9]{5,12}$/.test(data.image_id || '') ? data.image_id : null;
       if (data.factories && typeof data.factories === 'object') {
         for (const m of MODES) {
           const v = data.factories[m]; if (m === mode || !v || typeof v !== 'object' || !v.factory) continue;
-          const at = MODES.includes(v.where) ? `:${v.where}` : ''; // where this version's pictures are now
-          let floor = decode(v.image_factory);
-          if (floor && !looksLikeImage(floor)) return json({ error: 'not a picture' }, 400, h);
-          if (!floor && v.has_factory_img && oldId) floor = await env.LINKS.get(`imgf:${oldId}${at}`, { type: 'arrayBuffer' });
-          const pics = {};
-          if (v.state_images && typeof v.state_images === 'object') {
-            for (const [sk, val] of Object.entries(v.state_images).slice(0, 24)) {
-              const b = STATE_KEY.test(sk) ? decode(val) : null;
-              if (b && !looksLikeImage(b)) return json({ error: 'not a picture' }, 400, h);
-              if (b) pics[sk] = b;
+          const where = MODES.includes(v.where) ? v.where : ''; // where this version's pictures are now
+          const pics = {}; let vfloor;
+          try {
+            vfloor = (await blob(v.image_factory)) || (v.has_factory_img ? await oldRef('floor', where) : null);
+            if (v.state_images && typeof v.state_images === 'object') {
+              for (const [sk, val] of Object.entries(v.state_images).slice(0, 24)) if (STATE_KEY.test(sk)) { const n = await blob(val); if (n) pics[sk] = n; }
             }
-          }
-          if (oldId && Array.isArray(v.state_keys)) {
-            for (const sk of v.state_keys.slice(0, 24)) {
-              if (typeof sk !== 'string' || !STATE_KEY.test(sk) || pics[sk]) continue;
-              const b = await env.LINKS.get(`imgs:${oldId}${at}:${sk}`, { type: 'arrayBuffer' });
-              if (b) pics[sk] = b;
+            if (Array.isArray(v.state_keys)) {
+              for (const sk of v.state_keys.slice(0, 24)) {
+                if (typeof sk !== 'string' || !STATE_KEY.test(sk) || pics[sk]) continue;
+                const n = await oldRef('state', where, sk); if (n) pics[sk] = n;
+              }
             }
-          }
+          } catch (e) { if (e instanceof BadPicture) return json({ error: 'not a picture' }, 400, h); throw e; }
           const factory = cleanFactory(v.factory, nParts);
-          if (factory) variants[m] = { factory, floor, pics, floor_badges: cleanBadges(v.floor_badges) };
+          if (factory) variants[m] = { factory, floor: vfloor, pics, floor_badges: cleanBadges(v.floor_badges) };
         }
       }
       data = cleanAnswer(data);
-      data.has_whole = !!wholeBytes;
+      data.has_whole = !!whole;
       if (data.factory) data.factory_mode = mode;
       const vNames = Object.keys(variants);
       if (vNames.length) {
         data.factories = Object.fromEntries(vNames.map((m) => { const v = variants[m]; const keys = Object.keys(v.pics).sort();
           return [m, { factory: v.factory, has_factory_img: !!v.floor || undefined, state_keys: keys.length ? keys : undefined, floor_badges: v.floor_badges }]; }));
       }
-      const stateKeys = data.factory ? Object.keys(stateBytes).sort() : [];
+      const stateKeys = data.factory ? Object.keys(states).sort() : [];
       if (stateKeys.length) data.state_keys = stateKeys;
-      if (factBytes && data.factory) data.has_factory_img = true;
-      // same answer (+ same picture) → same id, so re-sharing never fills the store
+      if (floor && data.factory) data.has_factory_img = true;
+      data.pics = { main: main || undefined, whole: whole || undefined, floor: (data.factory && floor) || undefined,
+        s: stateKeys.length ? Object.fromEntries(stateKeys.map((sk) => [sk, states[sk]])) : undefined,
+        v: vNames.length ? Object.fromEntries(vNames.map((m) => [m, { floor: variants[m].floor || undefined, s: variants[m].pics }])) : undefined };
+      // same answer (+ same pictures) → same id, so re-sharing never fills the store
       const body = JSON.stringify(data);
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body + (imgBytes ? imgBytes.byteLength : '') + (factBytes ? `f${factBytes.byteLength}` : '') + stateKeys.map((sk) => `${sk}${stateBytes[sk].byteLength}`).join('') + vNames.map((m) => `${m}${variants[m].floor?.byteLength || 0}${Object.values(variants[m].pics).map((b) => b.byteLength).join('.')}`).join('')));
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
       const k = [...new Uint8Array(digest).slice(0, 7)].map((x) => ALPHABET[x % ALPHABET.length]).join('');
-      data.image_id = imgBytes ? k : (data.image_id || undefined);
-      await env.LINKS.put(k, JSON.stringify(data));
-      if (imgBytes) await env.LINKS.put(`img:${k}`, imgBytes);
-      if (wholeBytes) await env.LINKS.put(`imgw:${k}`, wholeBytes);
-      if (data.has_factory_img) await env.LINKS.put(`imgf:${k}`, factBytes);
-      for (const sk of stateKeys) await env.LINKS.put(`imgs:${k}:${sk}`, stateBytes[sk]);
-      for (const m of vNames) {
-        if (variants[m].floor) await env.LINKS.put(`imgf:${k}:${m}`, variants[m].floor);
-        for (const [sk, b] of Object.entries(variants[m].pics)) await env.LINKS.put(`imgs:${k}:${m}:${sk}`, b);
+      data.image_id = main ? k : undefined;
+      if (k !== oldId || !old) {
+        for (const [name, b] of fresh) await env.LINKS.put(name, b);
+        await env.LINKS.put(k, JSON.stringify(data));
       }
       // "factory", "states" and "variants" tell the page what this service kept (an older one drops them silently)
       return json({ id: k, factory: !!data.factory, financials: !!data.financials, atlas: !!data.atlas, states: stateKeys.length,
@@ -377,5 +406,5 @@ export default {
     }
 
     return json({ ok: true, service: 'how-links', admin: !!env.ADMIN_SECRET }, 200, h);
-  },
-};
+  }
+}
