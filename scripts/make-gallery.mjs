@@ -83,7 +83,16 @@ async function repair(ctx, site, ids) {
       if (res.request().method() !== 'POST' || !res.url().startsWith('https://how-links')) return;
       console.log(`  save → ${res.status()} ${(await res.text().catch(() => '')).slice(0, 300)}`);
     });
-    page.on('requestfailed', (rq) => { if (rq.url().startsWith('https://how-links')) console.log(`  save failed: ${rq.failure()?.errorText} (${(rq.postData() || '').length} bytes)`); });
+    page.on('requestfailed', async (rq) => {
+      if (!rq.url().startsWith('https://how-links')) return;
+      console.log(`  save failed: ${rq.failure()?.errorText} (${(rq.postData() || '').length} bytes)`);
+      if (rq.method() !== 'POST' || process.env.DIAG_DONE) return; process.env.DIAG_DONE = '1';
+      // the browser hides the real answer (no CORS headers on an error page); ask again from here to see it
+      const res = await fetch(rq.url(), { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://how.sala.company' }, body: rq.postData() }).catch((e) => ({ status: e.message, text: async () => '' }));
+      console.log(`  same save from outside the browser → ${res.status} ${(await res.text()).slice(0, 400)}`);
+      const d = JSON.parse(rq.postData());
+      console.log(`  payload: image_id=${d.image_id} mode=${d.factory_mode} where=${d.factory_where} has_factory_img=${d.has_factory_img} state_keys=${(d.state_keys || []).join(' ')} new=${Object.keys(d.state_images || {}).join(' ')} versions=${Object.entries(d.factories || {}).map(([m, v]) => `${m}@${v.where}:floor=${v.has_factory_img}:keys=${(v.state_keys || []).length}:new=${Object.keys(v.state_images || {}).length}`).join(' ')}`);
+    });
     try {
       await page.goto(`${site}#page/s=${id}`); await page.waitForFunction(() => state.result && state.shortId, null, { timeout: 60000 });
       await page.evaluate(() => loadFeatures());
