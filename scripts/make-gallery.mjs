@@ -6,7 +6,8 @@
 //
 // About 30¢ and 5–10 minutes per thing. Optional: ITEMS="kettle, bicycle" (default: the list below), REGION (Money tab), MAX_SPEND in US
 // dollars (default 15: stops before starting a new item once spent), HOW_SITE (default the live site).
-// CHECK_ONLY=true checks both secrets without spending anything. Runs from GitHub Actions too: see
+// CHECK_ONLY=true checks both secrets without spending anything. REPAIR=<page ids or links> paints
+// what is missing on stored pages instead of making new ones. Runs from GitHub Actions too: see
 // .github/workflows/gallery.yml.
 
 export const DEFAULT_ITEMS = ['kettle', 'toaster', 'bicycle', 'can opener', 'zipper', 'electric motor', 'ballpoint pen', 'umbrella', 'padlock',
@@ -31,6 +32,7 @@ export async function makeOne(page, item, { region, log = console.log } = {}) {
   log(`  money: ${m.ok ? 'ok' : 'failed'}${m.error ? ` (${m.error})` : ''}`);
   const a = await page.evaluate(async () => { await makeAtlas(); return { error: state.result.atlas_error || '', ok: !!state.result.atlas }; });
   log(`  map: ${a.ok ? 'ok' : 'failed'}${a.error ? ` (${a.error})` : ''}`);
+  log(`  gaps: ${await fillGaps(page)}`);
   const g = await page.evaluate(async () => { await galleryAdd(); return { text: $('#gallery-add').textContent, id: state.shortId, cost: state.cost }; });
   Object.assign(out, { ok: /In the gallery/.test(g.text), id: g.id, cost: g.cost, gallery: g.text, minutes: Math.round((Date.now() - t0) / 6e4) });
   return out;
@@ -53,6 +55,47 @@ async function check(key, admin) {
   return ok;
 }
 
+// Paint any before/after picture still missing, in every factory version. Versions that borrow
+// fewest pictures go first, so the ones the others borrow from are complete before they are checked.
+export async function fillGaps(page) {
+  return page.evaluate(async () => {
+    const r = state.result; const out = []; const shown = r.factory_mode || 'mixed';
+    const all = { ...(r.factories || {}) }; if (r.factory) all[r.factory_mode || 'mixed'] = { factory: r.factory };
+    const borrowed = (f) => (f.states || []).reduce((n, st) => n + !!st.before?.same_as + !!st.after?.same_as, 0);
+    const order = Object.entries(all).filter(([, v]) => v.factory?.applicable).sort((a, b) => borrowed(a[1].factory) - borrowed(b[1].factory)).map(([m]) => m);
+    for (const m of order) {
+      switchMode(state.result, m); setView('factory', { scroll: false });
+      const f = state.result.factory; const sts = f.states || [];
+      const missing = sts.length < f.zones.length || sts.some((st, i) => ['before', 'after'].some((w) => !stateUrl(state.result, stateKey(st, i, w, sts))));
+      if (missing) { await makeStates(); out.push(`${m} ${state.result.factory_error ? `still has gaps (${state.result.factory_error})` : 'filled'}`); }
+    }
+    if (out.length && (state.result.factory_mode || 'mixed') !== shown) { switchMode(state.result, shown); await saveFactory(state.result); }
+    return out.join(', ') || 'none';
+  });
+}
+
+// Repair stored pages: paint whatever is missing, and swap the repaired page into the gallery.
+async function repair(ctx, site, ids) {
+  for (const id of ids) {
+    const page = await ctx.newPage();
+    try {
+      await page.goto(`${site}#page/s=${id}`); await page.waitForFunction(() => state.result && state.shortId, null, { timeout: 60000 });
+      await page.evaluate(() => loadFeatures());
+      console.log(`${id} (${await page.evaluate(() => state.result.title)}): gaps ${await fillGaps(page)}`);
+      const r = await page.evaluate(async (old) => {
+        const inGallery = state.gallery.some((g) => g.id === old);
+        if (inGallery && state.shortId !== old) {
+          await fetch(`${LINKS_API}/gallery/${old}`, { method: 'DELETE', headers: { 'X-Admin': state.admin } });
+          await galleryAdd();
+        }
+        return { now: state.shortId, inGallery };
+      }, id);
+      console.log(`  now ${site}#s=${r.now}${r.inGallery ? ' (replaced in the gallery)' : ''}`);
+    } catch (e) { console.log(`  failed: ${e.message.split('\n')[0]}`); }
+    await page.close();
+  }
+}
+
 async function main() {
   const key = process.env.OPENROUTER_KEY, admin = process.env.HOW_ADMIN_SECRET;
   if (!key || !admin) { console.error(`Missing secret: ${[!key && 'OPENROUTER_KEY', !admin && 'HOW_ADMIN_SECRET'].filter(Boolean).join(' and ')}.`); process.exit(1); }
@@ -65,6 +108,7 @@ async function main() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
   await ctx.addInitScript(([k, a, reg]) => { localStorage.setItem('or_key', k); localStorage.setItem('how_admin', a); localStorage.setItem('how_region', reg); }, [key, admin, region]);
+  if (process.env.REPAIR) { await repair(ctx, site, process.env.REPAIR.split(',').map((s) => s.trim().replace(/^.*s=/, '')).filter(Boolean)); await browser.close(); return; }
   let spent = 0; const done = [];
   for (const item of items) {
     if (spent >= maxSpend) { console.log(`Stopping: $${spent.toFixed(2)} spent, limit $${maxSpend}.`); break; }

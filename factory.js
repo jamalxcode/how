@@ -319,7 +319,8 @@ async function paintStates(r, signal) {
     f.states.forEach((st, i) => {
       for (const w of st.before_from ? ['after'] : ['after', 'before']) {
         // an empty description still gets a picture, from its label
-        jobs.push({ key: stateKey(st, i, w, f.states), prompt: st[w].prompt || `${thing}: ${st[w].label || f.zones[i]?.name_en || ''}, ${w === 'before' ? 'as it arrives at' : 'as it leaves'} the ${f.zones[i]?.name_en || 'zone'}.` });
+        const plain = `${thing}: ${st[w].label || f.zones[i]?.name_en || ''}, ${w === 'before' ? 'as it arrives at' : 'as it leaves'} the ${f.zones[i]?.name_en || 'zone'}.`;
+        jobs.push({ key: stateKey(st, i, w, f.states), prompt: st[w].prompt || plain, plain });
       }
     });
     r.state_imgs = r.state_imgs || {}; r.state_running = new Set();
@@ -327,14 +328,26 @@ async function paintStates(r, signal) {
     let done = 0;
     task(r, 'pics', 'run', { total: todo.length, done });
     fillStates(r);
+    const retry = [];
     await inPool(todo, PIC_LANES, async (j) => {
       r.state_running.add(j.key); fillState(r, j.key);
       try {
         r.state_imgs[j.key] = await shrink(await paint(`${j.prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'low' }));
-      } catch (e) { if (e?.name === 'AbortError') throw e; failed++; }
+        task(r, 'pics', null, { done: ++done });
+      } catch (e) { if (e?.name === 'AbortError') throw e; retry.push(j); }
       r.state_running.delete(j.key); fillState(r, j.key);
-      task(r, 'pics', null, { done: ++done });
     });
+    // a picture that failed (busy service, a refused description) is tried again once the rest are
+    // done, one at a time, and then once more with a plain description from its label
+    for (const j of retry) {
+      r.state_running.add(j.key); fillState(r, j.key);
+      for (const prompt of [j.prompt, j.plain]) {
+        try { r.state_imgs[j.key] = await shrink(await paint(`${prompt} ${STATE_STYLE}`, signal, { size: '1024x1024', quality: 'low' })); break; }
+        catch (e) { if (e?.name === 'AbortError') throw e; }
+      }
+      if (r.state_imgs[j.key]) task(r, 'pics', null, { done: ++done }); else failed++;
+      r.state_running.delete(j.key); fillState(r, j.key);
+    }
     task(r, 'pics', 'done');
   }
   return failed ? `${failed} before/after picture${failed > 1 ? 's' : ''} could not be painted. Press “Paint the missing pictures” to try again.` : '';

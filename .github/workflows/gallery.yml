@@ -18,6 +18,10 @@ on:
         description: Stop starting new items after this many US dollars
         required: false
         default: '15'
+      repair:
+        description: Instead, repair these pages (ids or share links, comma separated)
+        required: false
+        default: ''
       check_only:
         description: Only check that both secrets work (free, makes nothing)
         type: boolean
@@ -41,3 +45,4 @@ jobs:
           REGION: ${{ inputs.region }}
           MAX_SPEND: ${{ inputs.max_spend }}
           CHECK_ONLY: ${{ inputs.check_only }}
+          REPAIR: ${{ inputs.repair }}
