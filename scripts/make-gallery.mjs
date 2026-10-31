@@ -75,8 +75,10 @@ export async function fillGaps(page) {
 }
 
 // Repair stored pages: paint whatever is missing, and swap the repaired page into the gallery.
+// "abc1234~xyz5678" repairs abc1234 and puts the result in the gallery in place of xyz5678.
 async function repair(ctx, site, ids) {
-  for (const id of ids) {
+  for (const spec of ids) {
+    const [id, also] = spec.split('~');
     const page = await ctx.newPage();
     // show what the link service says to each save, so a refused save is not silent
     page.on('response', async (res) => {
@@ -97,14 +99,12 @@ async function repair(ctx, site, ids) {
       await page.goto(`${site}#page/s=${id}`); await page.waitForFunction(() => state.result && state.shortId, null, { timeout: 60000 });
       await page.evaluate(() => loadFeatures());
       console.log(`${id} (${await page.evaluate(() => state.result.title)}): gaps ${await fillGaps(page)}`);
-      const r = await page.evaluate(async (old) => {
-        const inGallery = state.gallery.some((g) => g.id === old);
-        if (inGallery && state.shortId !== old) {
-          await fetch(`${LINKS_API}/gallery/${old}`, { method: 'DELETE', headers: { 'X-Admin': state.admin } });
-          await galleryAdd();
-        }
-        return { now: state.shortId, inGallery: inGallery && state.shortId !== old };
-      }, id);
+      const r = await page.evaluate(async (olds) => {
+        const listed = olds.filter((o) => o && o !== state.shortId && state.gallery.some((g) => g.id === o));
+        for (const o of listed) await fetch(`${LINKS_API}/gallery/${o}`, { method: 'DELETE', headers: { 'X-Admin': state.admin } });
+        if (listed.length) await galleryAdd();
+        return { now: state.shortId, inGallery: listed.length > 0 };
+      }, [id, also]);
       console.log(`  now ${site}#s=${r.now}${r.inGallery ? ' (replaced in the gallery)' : ''}`);
     } catch (e) { console.log(`  failed: ${e.message.split('\n')[0]}`); }
     await page.close();
@@ -123,7 +123,7 @@ async function main() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext();
   await ctx.addInitScript(([k, a, reg]) => { localStorage.setItem('or_key', k); localStorage.setItem('how_admin', a); localStorage.setItem('how_region', reg); }, [key, admin, region]);
-  if (process.env.REPAIR) { await repair(ctx, site, process.env.REPAIR.split(',').map((s) => s.trim().replace(/^.*s=/, '')).filter(Boolean)); await browser.close(); return; }
+  if (process.env.REPAIR) { await repair(ctx, site, process.env.REPAIR.split(',').map((s) => s.trim().replace(/^.*s=/, '').replace(/~.*s=/, '~')).filter(Boolean)); await browser.close(); return; }
   let spent = 0; const done = [];
   for (const item of items) {
     if (spent >= maxSpend) { console.log(`Stopping: $${spent.toFixed(2)} spent, limit $${maxSpend}.`); break; }

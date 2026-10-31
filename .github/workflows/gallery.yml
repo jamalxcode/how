@@ -19,7 +19,7 @@ on:
         required: false
         default: '15'
       repair:
-        description: Instead, repair these pages (ids or share links, comma separated)
+        description: Instead, repair these pages (ids or share links, comma separated; old~current replaces current in the gallery)
         required: false
         default: ''
       check_only:

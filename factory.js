@@ -152,7 +152,8 @@ function factoryUrl(r) { return r.image_factory || (r.has_factory_img && r.image
 function switchMode(r, mode) {
   if (r.factory_busy || mode === (r.factory_mode || 'mixed')) return;
   r.factories = r.factories || {};
-  if (r.factory) r.factories[r.factory_mode || 'mixed'] = Object.fromEntries(VFIELDS.map((k) => [k, r[k]]));
+  // the version shown now is put away; its stored pictures sit at the top of the saved page ('')
+  if (r.factory) r.factories[r.factory_mode || 'mixed'] = { ...Object.fromEntries(VFIELDS.map((k) => [k, r[k]])), factory_where: r.factory_where || '' };
   const next = r.factories[mode] || {};
   VFIELDS.forEach((k) => { r[k] = next[k]; });
   if (r.factory) r.factory = cleanFactory(r.factory, (r.parts || []).length);
