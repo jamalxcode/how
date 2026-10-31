@@ -6,6 +6,8 @@
 //
 // About 30¢ and 5–10 minutes per thing. Optional: ITEMS="kettle, bicycle" (default: the list below), REGION (Money tab), MAX_SPEND in US
 // dollars (default 15: stops before starting a new item once spent), HOW_SITE (default the live site).
+// The link service may write 1,000 times a day (Cloudflare free plan) and a complete item is 50+
+// writes, so make at most ~15 items a day; when the store is full the run stops with exit code 1.
 // CHECK_ONLY=true checks both secrets without spending anything. REPAIR=<page ids or links> paints
 // what is missing on stored pages instead of making new ones. Runs from GitHub Actions too: see
 // .github/workflows/gallery.yml.
@@ -13,6 +15,22 @@
 export const DEFAULT_ITEMS = ['kettle', 'toaster', 'bicycle', 'can opener', 'zipper', 'electric motor', 'ballpoint pen', 'umbrella', 'padlock',
   'stapler', 'flashlight', 'ceiling fan', 'refrigerator', 'internal combustion engine', 'toilet flush', 'computer mouse', 'electric toothbrush', 'pressure cooker'];
 const MODES = ['mixed', 'manual', 'auto'];
+const LINKS_API = 'https://how-links.jamal-akuna-matata.workers.dev';
+
+// Watches every save the page makes. Cloudflare's free plan allows the link service 1,000 writes a
+// day, and one complete gallery item is 50+ (page, exploded and whole views, three factory floors, the
+// before/after squares). Past the limit the service answers 503 "the link store is full for today"
+// and every further page would cost OpenRouter money while saving nothing, so the run must stop.
+export function watchSaves(page, state) {
+  page.on('response', async (res) => {
+    const rq = res.request();
+    if (rq.method() !== 'POST' || !rq.url().startsWith(LINKS_API) || res.ok()) return;
+    const text = await res.text().catch(() => '');
+    if (res.status() === 503 && /full for today|write limit/i.test(text)) state.storeFull = true;
+    else if (res.status() >= 500) state.saveErrors = (state.saveErrors || 0) + 1;
+    console.log(`  save → ${res.status()} ${text.slice(0, 200)}`);
+  });
+}
 
 // One thing, start to finish, on a page that is already open on the site.
 export async function makeOne(page, item, { region, log = console.log } = {}) {
@@ -77,14 +95,11 @@ export async function fillGaps(page) {
 // Repair stored pages: paint whatever is missing, and swap the repaired page into the gallery.
 // "abc1234~xyz5678" repairs abc1234 and puts the result in the gallery in place of xyz5678.
 async function repair(ctx, site, ids) {
+  const saves = {};
   for (const spec of ids) {
     const [id, also] = spec.split('~');
     const page = await ctx.newPage();
-    // show what the link service says to each save, so a refused save is not silent
-    page.on('response', async (res) => {
-      if (res.request().method() !== 'POST' || !res.url().startsWith('https://how-links')) return;
-      console.log(`  save → ${res.status()} ${(await res.text().catch(() => '')).slice(0, 300)}`);
-    });
+    watchSaves(page, saves); // every refused save is shown, and a full store stops the run below
     page.on('requestfailed', async (rq) => {
       if (!rq.url().startsWith('https://how-links')) return;
       console.log(`  save failed: ${rq.failure()?.errorText} (${(rq.postData() || '').length} bytes)`);
@@ -108,7 +123,9 @@ async function repair(ctx, site, ids) {
       console.log(`  now ${site}#s=${r.now}${r.inGallery ? ' (replaced in the gallery)' : ''}`);
     } catch (e) { console.log(`  failed: ${e.message.split('\n')[0]}`); }
     await page.close();
+    if (saves.storeFull) { console.log(`\nStopping: the link store is full for today (Cloudflare's free plan allows 1,000 writes a day). Run again after midnight UTC (3 am Kuwait).`); process.exitCode = 1; break; }
   }
+  if (saves.saveErrors) process.exitCode = 1;
 }
 
 async function main() {
@@ -124,11 +141,11 @@ async function main() {
   const ctx = await browser.newContext();
   await ctx.addInitScript(([k, a, reg]) => { localStorage.setItem('or_key', k); localStorage.setItem('how_admin', a); localStorage.setItem('how_region', reg); }, [key, admin, region]);
   if (process.env.REPAIR) { await repair(ctx, site, process.env.REPAIR.split(',').map((s) => s.trim().replace(/^.*s=/, '').replace(/~.*s=/, '~')).filter(Boolean)); await browser.close(); return; }
-  let spent = 0; const done = [];
+  let spent = 0; const done = []; const saves = {};
   for (const item of items) {
     if (spent >= maxSpend) { console.log(`Stopping: $${spent.toFixed(2)} spent, limit $${maxSpend}.`); break; }
     console.log(`${item}…`);
-    const page = await ctx.newPage();
+    const page = await ctx.newPage(); watchSaves(page, saves);
     try {
       await page.goto(site); await page.waitForFunction(() => typeof loadFeatures === 'function');
       const r = await makeOne(page, item, { region });
@@ -136,10 +153,15 @@ async function main() {
       console.log(`  ${r.ok ? 'added to the gallery' : `not added: ${r.error || r.gallery}`} · $${(r.cost || 0).toFixed(2)} · ${r.minutes ?? '?'} min · total $${spent.toFixed(2)}`);
     } catch (e) { console.log(`  failed: ${e.message.split('\n')[0]}`); }
     await page.close();
+    if (saves.storeFull) {
+      console.log(`\nStopping: the link store is full for today (Cloudflare's free plan allows 1,000 writes a day). "${item}" was not saved. Run again after midnight UTC (3 am Kuwait), a few items at a time.`);
+      process.exitCode = 1; break;
+    }
   }
   await browser.close();
   console.log(`\nDone: ${done.filter((d) => d.ok).length} of ${items.length} added, $${spent.toFixed(2)} spent.`);
   for (const d of done) console.log(`- ${d.item}: ${d.ok ? `${site}#s=${d.id}` : d.error || d.gallery}`);
+  if (saves.saveErrors) { console.log(`${saves.saveErrors} save(s) failed with a link service error; check the pages above.`); process.exitCode = 1; }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

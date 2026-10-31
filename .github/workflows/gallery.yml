@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       items:
-        description: Things to make, comma separated (empty = the 18 in scripts/make-gallery.mjs)
+        description: Things to make, comma separated (empty = the 18 in scripts/make-gallery.mjs). The link store takes ~15 items a day (Cloudflare's 1,000 writes); the run stops, red, when it is full
         required: false
         default: ''
       region:
