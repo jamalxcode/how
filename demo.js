@@ -21,6 +21,17 @@ const DEMO = {
       { title: 'Shear', text: 'The two edges slide past each other, pinching the paper from both sides until it splits.' },
       { title: 'Moving cut', text: 'The crossing point travels along the blades, so the cut runs forward as you close them.' },
     ],
+    // build it up: from tweezers to scissors, one problem at a time (app.js, renderBuild)
+    buildup: {
+      start: 'A pair of tweezers: two arms that pinch paper between them.',
+      steps: [
+        { problem: 'Tweezers only pinch: the paper bends but never splits.', fix: 'Grind one arm into a sharp blade, with a ring at the back to push it.', parts: [1] },
+        { problem: 'One blade just presses the paper flat; nothing meets it from the other side.', fix: 'Add a second blade that crosses the first, so the two edges slide past each other.', parts: [2] },
+        { problem: 'The blades wobble apart, and the paper slips into the gap between them.', fix: 'Join them with a pivot screw that turns them together and keeps the edges pressed tight.', parts: [3] },
+        { problem: 'Tough card will not cut: your fingers are not strong enough.', fix: 'Put the screw close to the blades, so long handles turn a small squeeze into a strong pinch.', parts: [] },
+      ],
+      ending: 'You started with tweezers that pinch; you ended with two levers that slice.',
+    },
     // the map: where the materials come from, and wages, power and rent in likely countries (atlas.js)
     atlas: {
       materials: [

@@ -800,3 +800,26 @@ body.has-result .hero-sub { display: none; }
 @media (prefers-reduced-motion: reduce) { .atlas-map .route { animation: none; stroke-dashoffset: 0; } }
 .atlas-map .route.casing { stroke: #fffdf7; opacity: .9; }
 .atlas-map .route { opacity: .95; }
+
+/* Build it up: one problem at a time */
+.build-start { margin: 6px 0 10px; font-size: 16px; }
+.build-wait { color: var(--muted); margin: 4px 0 8px; }
+.build-wait:empty { display: none; }
+.bsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.bsteps li { background: var(--paper-2); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 14px 12px 50px; position: relative; cursor: pointer; transition: border-color .15s, background .15s; }
+.bsteps li:hover, .bsteps li:focus-visible { border-color: var(--ink); outline: none; }
+.bsteps li.now { border-color: var(--red); box-shadow: 0 0 0 3px rgba(228,87,46,.18); }
+.bsteps li.now .num { background: var(--red); color: #fff; }
+.bsteps p { margin: 0; font-size: 15px; line-height: 1.4; }
+.bprob { color: var(--ink-2); }
+.bprob span { color: var(--red); font-weight: 900; }
+.bfix { margin-top: 4px !important; font-weight: 700; }
+.bfix span { color: var(--teal); font-weight: 900; }
+.badds { margin-top: 6px !important; font-size: 13px !important; color: var(--muted); }
+.bpart { display: inline-flex; align-items: center; gap: 4px; margin-inline-end: 8px; color: var(--ink-2); font-weight: 700; }
+.bn { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--teal); color: #fff; font-size: 11px; font-weight: 900; }
+.build-end { margin: 16px 0 4px; padding: 14px 6px; text-align: center; font-family: var(--font-display); font-size: 21px; line-height: 1.35; font-weight: 700; border-top: 2px dashed var(--line); border-bottom: 2px dashed var(--line); }
+.result[dir="rtl"] .bsteps li { padding: 12px 50px 12px 14px; }
+/* on the picture: parts not added yet are covered, earlier ones ringed, the new one pulses */
+.picture .hot.later { background: #fbf4e4; opacity: .9; box-shadow: none; }
+.picture .hot.added { box-shadow: 0 0 0 4px rgba(31,138,138,.8); }

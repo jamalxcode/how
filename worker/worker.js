@@ -46,6 +46,8 @@ function cleanAnswer(d) {
     floor_badges: cleanBadges(d.floor_badges),
     financials: cleanFinancials(d.financials),
     atlas: cleanAtlas(d.atlas),
+    // "build it up": the thing put together one problem at a time, each step adding numbered parts
+    buildup: cleanBuild(d.buildup, Array.isArray(d.parts) ? Math.min(d.parts.length, 20) : 0),
   };
   const m = d.m3d;
   if (m && typeof m === 'object' && /^[a-f0-9]{32}$/i.test(m.uid || '')) {
@@ -53,6 +55,12 @@ function cleanAnswer(d) {
   }
   for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
   return out;
+}
+function cleanBuild(b, nParts) {
+  if (!b || typeof b !== 'object' || !Array.isArray(b.steps)) return undefined;
+  const steps = LIST(b.steps, 8, (x) => (x && typeof x === 'object' ? { problem: STR(x.problem, 240) || '', fix: STR(x.fix, 240) || '',
+    parts: Array.isArray(x.parts) ? [...new Set(x.parts.map((k) => Math.round(Number(k))))].filter((k) => k >= 1 && k <= nParts).slice(0, 6) : [] } : null));
+  return steps && steps.length >= 2 ? { start: STR(b.start, 160) || '', steps, ending: STR(b.ending, 200) || '' } : undefined;
 }
 // The Factory tab's plan (see factory.js, which trims it the same way before drawing).
 const STAGE_KEYS = ['materials', 'components', 'fabrication', 'assembly', 'quality', 'packing', 'shipping'];
@@ -401,7 +409,7 @@ async function handle(req, env) {
         await env.LINKS.put(k, JSON.stringify(data));
       }
       // "factory", "states" and "variants" tell the page what this service kept (an older one drops them silently)
-      return json({ id: k, factory: !!data.factory, financials: !!data.financials, atlas: !!data.atlas, states: stateKeys.length,
+      return json({ id: k, factory: !!data.factory, financials: !!data.financials, atlas: !!data.atlas, buildup: !!data.buildup, states: stateKeys.length,
         variants: Object.fromEntries(vNames.map((m) => [m, { floor: !!variants[m].floor, states: Object.keys(variants[m].pics).length }])) }, 200, h);
     }
 

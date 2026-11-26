@@ -333,7 +333,7 @@ let featuresLoading = null;
 function loadFeatures() {
   if (typeof renderMoney === 'function') return Promise.resolve();
   const add = (src) => new Promise((ok, no) => { const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => no(new Error('Could not load this tab. Check your connection and try again.')); document.body.appendChild(el); });
-  return (featuresLoading = featuresLoading || add('factory.js?v=19').then(() => add('money.js?v=4')).then(() => add('atlas.js?v=2')).catch((e) => { featuresLoading = null; throw e; }));
+  return (featuresLoading = featuresLoading || add('factory.js?v=20').then(() => add('money.js?v=4')).then(() => add('atlas.js?v=2')).catch((e) => { featuresLoading = null; throw e; }));
 }
 // A language's labels arrived after the page was drawn: put them in place.
 function relabel() {
@@ -473,6 +473,9 @@ function show(result, q, { free = false, shared = false, keepShort = false, pain
     steps.appendChild(li);
   });
 
+  if (demoOf && demoOf !== result && !result.buildup && demoOf.buildup) result.buildup = JSON.parse(JSON.stringify(demoOf.buildup));
+  renderBuild();
+
   const pending = state.pendingView; state.pendingView = null;
   $('#factory').innerHTML = ''; $('#money').innerHTML = ''; $('#atlas').innerHTML = ''; $$('.chap-head').forEach((h) => h.classList.remove('in'));
   $('#ch-made').hidden = $('#ch-costs').hidden = result.kind === 'refused';
@@ -514,13 +517,14 @@ function renderPicture() {
   }
   for (const b of badges) {
     const hot = document.createElement('button'); hot.type = 'button'; hot.className = 'hot'; hot.style.left = `${b.x}%`; hot.style.top = `${b.y}%`;
-    const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.dataset.name = part?.name || '';
+    const part = result.parts?.[b.n - 1]; hot.setAttribute('aria-label', part?.name || `part ${b.n}`); hot.dataset.name = part?.name || ''; hot.dataset.n = b.n;
     hot.addEventListener('click', (e) => { e.stopPropagation(); pingPart(b.n); showTip(e, b.n, part); setTimeout(hideTip, 2200); });
     hot.addEventListener('mouseenter', (e) => showTip(e, b.n, part));
     hot.addEventListener('mousemove', (e) => moveTip(e));
     hot.addEventListener('mouseleave', hideTip);
     picture.appendChild(hot);
   }
+  if (story.buildAt != null) markBuild();
   // preload the other one so the toggle is instant
   const other = pictureMode === 'whole' ? imageUrl(result) : wholeUrl(result);
   if (other) { const pre = new Image(); pre.src = other; }
@@ -561,6 +565,104 @@ function loadArabicFont() {
   l.href = 'https://fonts.googleapis.com/css2?family=Noto+Naskh+Arabic:wght@400;700&display=swap';
   document.head.appendChild(l);
 }
+// ---------- build it up: the thing put together one problem at a time ----------
+// Like a good teacher: start from something everyone knows, and let each step fix what is wrong with
+// the version so far by adding one of the numbered parts. One small text answer, made just before the
+// reader reaches it; as each step passes, the parts added so far light up on the picture.
+const BUILD_SCHEMA = { type: 'json_schema', json_schema: { name: 'buildup', strict: true, schema: { type: 'object', additionalProperties: false,
+  required: ['start', 'steps', 'ending'], properties: { start: { type: 'string' }, ending: { type: 'string' },
+    steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['problem', 'fix', 'parts'],
+      properties: { problem: { type: 'string' }, fix: { type: 'string' }, parts: { type: 'array', items: { type: 'integer' } } } } } } } } };
+const BUILD_RULES = `You explain how a thing works by BUILDING IT UP, one problem at a time, the way a good teacher would. Answer as JSON only.
+
+"start" (≤ 14 words): begin from something simple the reader already knows that does part of the job: a desk fan for a jet engine, a bucket with a hole for a toilet, a pair of tweezers for scissors. Say what it is and what it already does.
+"steps" (4–7): each step is what goes WRONG with the version so far, then the FIX that adds one numbered part (or one idea) from the parts list.
+- "problem" (≤ 16 words): concrete and visible ("The air sprays out sideways, so the plane does not move").
+- "fix" (≤ 16 words): what is added and what it does ("Slide a tube over the fan, so all the air goes straight back").
+- "parts": the numbers of the parts from the list that this step adds (usually one; empty if the fix is an idea, not a part).
+By the last step every numbered part has been added once, and the thing works as it really does. The order is a logical build-up, not history; never claim it is how it was invented.
+"ending" (≤ 16 words): one memorable closing line that ties the end back to the start ("You started with a fan; you ended with a fan. Everything in between is its motor.").
+Write everything in the language the request names, for the reader it names. No numbers or part names in brackets; plain sentences.`;
+function cleanBuild(b, nParts) {
+  if (!b || typeof b !== 'object' || !Array.isArray(b.steps)) return undefined;
+  const s = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+  const steps = b.steps.slice(0, 8).filter((x) => x && typeof x === 'object' && (x.problem || x.fix)).map((x) => ({
+    problem: s(x.problem, 240), fix: s(x.fix, 240),
+    parts: Array.isArray(x.parts) ? [...new Set(x.parts.map((k) => Math.round(Number(k))))].filter((k) => k >= 1 && k <= nParts).slice(0, 6) : [] }));
+  return steps.length >= 2 ? { start: s(b.start, 160), steps, ending: s(b.ending, 200) } : undefined;
+}
+function buildRequest(r) {
+  const parts = (r.parts || []).map((p, i) => `${i + 1}. ${p.name} (${p.name_en || p.name}): ${p.role}`).join('\n');
+  const steps = (r.steps || []).map((x) => `- ${x.title}: ${x.text}`).join('\n');
+  return `Build up: ${r.title}\nWhat it is: ${r.hook || ''}\nNumbered parts:\n${parts}\nHow it works:\n${steps}\nLanguage: ${r.lang || 'English'}. Reader: ${$('#level').value}.`;
+}
+async function makeBuildup(r = state.result) {
+  if (!r || r.buildup || r.kind === 'refused' || r._building || !state.key || !r.parts?.length) return;
+  r._building = true; r.build_error = ''; renderBuild();
+  try {
+    const j = await askJSON({ model: PLAN_MODEL, maxTokens: 1800, schema: BUILD_SCHEMA, signal: new AbortController().signal, messages: [
+      cachedSystem(BUILD_RULES), { role: 'user', content: buildRequest(r) }] });
+    r.buildup = cleanBuild(j, r.parts.length);
+    if (!r.buildup) r.build_error = 'The AI answered in a form the page could not read. Try again.';
+  } catch (e) { r.build_error = e.message; }
+  r._building = false;
+  if (state.result === r) renderBuild();
+  if (r.buildup) {
+    if (state.shortId) cachePut(cacheKey(state.query, r.lang || 'English', $('#level').value), r);
+    await loadFeatures().then(() => saveFactory(r)).catch(() => {}); // stored with the page, like the factory
+  }
+}
+function renderBuild() {
+  const r = state.result; const box = $('#build');
+  story.buildObs?.disconnect(); story.buildAt = null; markBuild();
+  if (!r || r.kind === 'refused' || !r.parts?.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const b = r.buildup;
+  const head = `<h3 class="list-h">${escapeHTML(tx('buildTitle'))}</h3>`;
+  if (!b) {
+    const msg = r._building ? tx('building') : r.build_error ? r.build_error : state.key ? '' : tx('buildSignIn');
+    box.innerHTML = `${head}<p class="build-wait">${escapeHTML(msg)}</p>${r.build_error && !r._building ? `<button type="button" class="btn btn-ghost btn-sm" id="build-retry">${escapeHTML(tx('buildRetry'))}</button>` : ''}`;
+    $('#build-retry')?.addEventListener('click', () => makeBuildup(r));
+    return;
+  }
+  const name = (n) => r.parts[n - 1]?.name || '';
+  box.innerHTML = `${head}${b.start ? `<p class="build-start"><b>${escapeHTML(tx('buildStart'))}</b> ${escapeHTML(b.start)}</p>` : ''}
+    <ol class="bsteps">${b.steps.map((x, i) => `<li tabindex="0"><span class="num">${i + 1}</span>
+      ${x.problem ? `<p class="bprob"><span aria-hidden="true">✗</span> ${escapeHTML(x.problem)}</p>` : ''}
+      ${x.fix ? `<p class="bfix"><span aria-hidden="true">✓</span> ${escapeHTML(x.fix)}</p>` : ''}
+      ${x.parts.length ? `<p class="badds">${escapeHTML(tx('buildAdds'))} ${x.parts.map((n) => `<span class="bpart"><bdi class="bn">${n}</bdi> ${escapeHTML(name(n))}</span>`).join(' ')}</p>` : ''}</li>`).join('')}</ol>
+    ${b.ending ? `<p class="build-end">${escapeHTML(b.ending)}</p>` : ''}`;
+  const cards = $$('#build .bsteps li');
+  cards.forEach((li, i) => { const go = () => litBuild(i); li.addEventListener('click', go); li.addEventListener('focus', go); });
+  // beside the sticky picture (wide screens): the step in the middle of the screen sets which parts are lit
+  if ('IntersectionObserver' in window && window.innerWidth >= 900) {
+    const steps = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) litBuild(cards.indexOf(e.target)); }), { rootMargin: '-45% 0px -45% 0px' });
+    cards.forEach((li) => steps.observe(li));
+    // scrolled away from the build-up: the picture goes back to all parts
+    const away = new IntersectionObserver((es) => es.forEach((e) => { if (!e.isIntersecting && story.buildAt != null) { story.buildAt = null; markBuild(); } }));
+    away.observe(box);
+    story.buildObs = { disconnect: () => { steps.disconnect(); away.disconnect(); } };
+  }
+}
+// Show the parts added up to build step i: the new ones pulse, earlier ones are ringed, later ones are covered.
+function litBuild(i) {
+  if (i < 0) return;
+  story.buildAt = i;
+  if (pictureMode !== 'exploded' && !story.userPic) setView('exploded', { scroll: false }); else markBuild();
+}
+function markBuild() {
+  const b = state.result?.buildup; const i = story.buildAt;
+  $$('#build .bsteps li').forEach((li, k) => li.classList.toggle('now', k === i));
+  const added = new Set(); const fresh = new Set(b && i != null ? b.steps[i]?.parts : []);
+  if (b && i != null) b.steps.slice(0, i + 1).forEach((x) => x.parts.forEach((n) => added.add(n)));
+  $$('#picture .hot').forEach((h) => {
+    const n = Number(h.dataset.n); const on = i != null;
+    h.classList.toggle('later', on && !added.has(n));
+    h.classList.toggle('added', on && added.has(n) && !fresh.has(n));
+    h.classList.toggle('pulse', on && fresh.has(n));
+  });
+}
+
 // ---------- the answer as one story: how it works → how it's made → what it costs ----------
 // setView keeps its old names: the picture's two looks, and a part of the story to scroll to.
 const SECTION_OF = { photos: '#view-photos', model3d: '#view-model3d', factory: '#ch-made', money: '#ch-costs' };
@@ -585,7 +687,7 @@ function renderChapter(view) {
   return loadFeatures().then(() => { if (view === 'factory') renderFactory(); else { renderAtlas(); renderMoney(); } })
     .catch((e) => { box.innerHTML = `<p class="empty">${escapeHTML(e.message)}</p>`; });
 }
-const story = { drawn: new Set(), userPic: false, observers: [] };
+const story = { drawn: new Set(), userPic: false, observers: [], buildAt: null, buildObs: null };
 // Watches the reader's scroll: draws chapters just before they arrive, lights the chapter bar,
 // takes the picture apart as the parts come up, and pulses each part's number as its card passes.
 function startStory() {
@@ -597,6 +699,7 @@ function startStory() {
     const v = e.target.id === 'ch-made' ? 'factory' : 'money';
     if (e.isIntersecting && !story.drawn.has(v) && state.result?.kind !== 'refused') renderChapter(v);
   });
+  watch([$('#build')], { rootMargin: '600px 0px' }, (e) => { if (e.isIntersecting && state.result && !state.result.buildup) makeBuildup(state.result); });
   watch($$('.chap-head'), { rootMargin: '0px 0px -15% 0px' }, (e) => { if (e.isIntersecting) e.target.classList.add('in'); });
   // whole at the top, pulled apart once the parts come up (until the reader picks one)
   watch([$('#parts')], { rootMargin: '-35% 0px -40% 0px' }, (e) => {
@@ -757,11 +860,11 @@ async function storeResult(result, q, signal) {
   } catch (e) { if (e?.name === 'AbortError') throw e; return null; }
 }
 function sharePayload(result) {
-  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories, financials, atlas } = result;
+  const { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image, image_whole, image_id, image_prompt, whole_prompt, has_whole, badges, factory, image_factory, has_factory_img, state_imgs, state_keys, floor_badges, factory_mode, factory_where, factories, financials, atlas, buildup } = result;
   const m = state.model3d;
   const m3d = m?.uid ? { uid: m.uid, name: m.name, by: m.by, url: m.url } : undefined;
   return { title, hook, kind, wikipedia_title, search_terms, parts, steps, fun_fact, lang, image: image || undefined, image_whole: image_whole || undefined, has_whole: has_whole || !!image_whole || undefined, image_id: image_id || undefined, image_prompt, whole_prompt, badges: badges || undefined, m3d, q: result.q || state.query, factory: factory || undefined, image_factory: image_factory || undefined, has_factory_img: has_factory_img || undefined, state_images: state_imgs && Object.keys(state_imgs).length ? state_imgs : undefined, state_keys: state_keys?.length ? state_keys : undefined, floor_badges: floor_badges?.length ? floor_badges : undefined,
-    financials: financials || undefined, atlas: atlas || undefined,
+    financials: financials || undefined, atlas: atlas || undefined, buildup: buildup || undefined,
     factory_mode: factory ? factory_mode || 'mixed' : undefined, factory_where: factory_where || undefined,
     factories: factories && Object.keys(factories).length ? Object.fromEntries(Object.entries(factories).map(([m, v]) => [m, { factory: v.factory, image_factory: v.image_factory || undefined, has_factory_img: v.has_factory_img || undefined, state_images: v.state_imgs && Object.keys(v.state_imgs).length ? v.state_imgs : undefined, state_keys: v.state_keys, floor_badges: v.floor_badges, where: v.factory_where ?? m }])) : undefined };
 }

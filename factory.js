@@ -385,13 +385,13 @@ function refreshFactory(r) {
 // pictures travel by id; only new ones (the floor, before/after) are sent. A link service that predates the
 // factory drops it (and says nothing about it), so then the plan is kept in this browser only.
 async function saveFactory(r) {
-  if ((!r.factory && !r.financials && !r.atlas) || (!r.image_id && !r.image)) { cacheFactory(r); return; }
+  if ((!r.factory && !r.financials && !r.atlas && !r.buildup) || (!r.image_id && !r.image)) { cacheFactory(r); return; }
   try {
     const body = sharePayload({ ...r, image: r.image_id ? undefined : r.image, image_whole: r.image_id ? undefined : r.image_whole, q: state.result === r ? state.query : r.q });
     const res = await fetch(`${LINKS_API}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const j = await res.json().catch(() => null);
     if (!res.ok && j?.error && state.result === r) showError(`Not saved: ${j.error}`);
-    if (res.ok && j?.id && (j.factory || j.financials || j.atlas)) {
+    if (res.ok && j?.id && (j.factory || j.financials || j.atlas || j.buildup)) {
       r.image_id = j.id; r.image = null; r.image_whole = null;
       if (r.image_factory) { r.has_factory_img = true; r.image_factory = null; }
       const keys = [...new Set([...(r.state_keys || []), ...Object.keys(r.state_imgs || {})])];

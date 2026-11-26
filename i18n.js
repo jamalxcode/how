@@ -65,6 +65,7 @@ I18N.en = {
   sellAt: 'Sell at', aboveMarket: 'above the usual market price', profit: 'Profit', aMonth: 'a month', paysBackIn: 'Pays back in',
   needMarkup: 'To pay back in {y} years you need about <b>{p}%</b> markup.',
   atlasTitle: "Where it comes from, and where to make it", atlasIntro: "See where the raw materials usually come from, and how the cost to make one changes from country to country.", atlasBtn: "Map it", atlasSignIn: "Sign in to OpenRouter to map it ({c}).", mapping: "Mapping…", atlasLegend: "Cost to make one: cheaper → dearer", wageLegend: "Factory wage: lower → higher", atlasNoMoney: "Estimate the money below to compare the cost to make one; until then the map is shaded by factory wages.", cheapest: "Cheapest places to make one", lowestWages: "Lowest factory wages", pickCountry: "Pick a country", materialsFrom: "Raw materials come from", mapNote: "Rough figures by AI: typical wages, power prices and rents, which vary a lot by city and year. Costs elsewhere are your estimate scaled by them.", pickHint: "Tap a country to see what it would cost to make one there.", factoryHere: "the factory", workerWage: "Factory wage", rentM2: "Rent", costHere: "Cost to make one here", vsHome: "{p} compared with {place}", useHere: "Estimate the money for {place}",
+  buildTitle: "Build it up, one problem at a time", buildStart: "Start with:", building: "Working out how to build it up…", buildSignIn: "Sign in to OpenRouter (top right) to build it up step by step (about 1¢).", buildAdds: "adds", buildRetry: "Try again",
   ch_works: "How it works", ch_made: "How it's made", ch_costs: "What it costs", ch_made_lead: "From raw material to the truck: the factory that would make it, three ways.", ch_costs_lead: "What it takes to set that factory up and run it, and when it pays back.",
 };
 
@@ -74,7 +75,7 @@ const langLoads = {};
 function loadLang(code, then) {
   if (code === 'en' || I18N[code]) return;
   if (!langLoads[code]) {
-    langLoads[code] = new Promise((ok) => { const el = document.createElement('script'); el.src = `i18n/${code}.js?v=3`; el.onload = ok; el.onerror = ok; document.head.appendChild(el); });
+    langLoads[code] = new Promise((ok) => { const el = document.createElement('script'); el.src = `i18n/${code}.js?v=4`; el.onload = ok; el.onerror = ok; document.head.appendChild(el); });
   }
   langLoads[code].then(() => { if (I18N[code]) then?.(); });
 }
